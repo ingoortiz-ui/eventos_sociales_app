@@ -1,0 +1,8 @@
+Guera|invitado0@evento.com|1|OrtPach
+Okky|invitado1@evento.com|1|OrtPach
+Valeria|invitado2@evento.com|1|OrtPach
+Samara|prueba|1|OrtPach
+correo repetido|invitado0@evento.com|1|OrtPach
+Okky|invitado1@evento.com|1|OrtPach
+Valeriainvitado2@evento.com1|OrtPach
+Samara|prueba|1|OrtPach
