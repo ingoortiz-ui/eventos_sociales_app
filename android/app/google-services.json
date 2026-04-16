@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "9551219558",
+    "project_id": "eventos-sociales-f6e1a",
+    "storage_bucket": "eventos-sociales-f6e1a.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:9551219558:android:cf7a6ac83fbddeb0c016a7",
+        "android_client_info": {
+          "package_name": "com.example.eventos_sociales_login_ok"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCc8t71Xdmb89esaWoM5fxcw3FuR5aNDz8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

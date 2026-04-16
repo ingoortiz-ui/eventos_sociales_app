@@ -1,0 +1,41 @@
+name: eventos_sociales_login_ok
+description: App de gestión de eventos sociales con QR, roles y Firebase.
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.4.3 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.6
+
+  # Firebase
+  firebase_core: ^3.6.0
+  firebase_auth: ^5.1.4
+  cloud_firestore: ^5.4.0
+  firebase_storage: ^12.3.2
+
+  # Multimedia
+  image_picker: ^1.1.2
+  
+  # QR y escáner
+  qr_flutter: ^4.1.0
+  mobile_scanner: ^5.1.1
+  share_plus: ^10.0.2
+  path_provider: ^2.1.4
+  pdf: ^3.11.1
+  printing: ^5.13.4
+  screenshot: ^3.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^3.0.2
+
+flutter:
+  uses-material-design: true
