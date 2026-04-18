@@ -5,10 +5,12 @@ import 'carga_invitados_txt_screen.dart';
 import 'compartir_galeria_screen.dart';
 import 'crear_invitado.dart';
 import 'editar_evento_screen.dart';
+import 'gestionar_anfitriones_screen.dart';
 import 'lista_invitados_screen.dart';
 import 'pdf_qrs_evento_screen.dart';
 import 'reporte_evento_screen.dart';
 import 'satisfaccion_evento_admin_screen.dart';
+import 'subir_croquis_screen.dart';
 
 class PanelEventoScreen extends StatelessWidget {
   final String eventoId;
@@ -149,6 +151,8 @@ class PanelEventoScreen extends StatelessWidget {
           final horario = _formatearHorario(data);
           final vencido = _eventoVencido(data);
           final bloquearInvitados = cerrado || archivado || vencido;
+          final cantidadAnfitriones =
+              (data['cantidadAnfitriones'] ?? 0).toString();
 
           return Padding(
             padding: const EdgeInsets.all(16),
@@ -166,6 +170,7 @@ class PanelEventoScreen extends StatelessWidget {
                 Text('Lugar: $lugar'),
                 Text('Horario: $horario'),
                 Text('Estado: $estado'),
+                Text('Cantidad anfitriones: $cantidadAnfitriones'),
                 if (vencido && !cerrado && !archivado)
                   const Text(
                     'El horario del evento ya terminó. Ya no se pueden registrar invitados.',
@@ -187,6 +192,36 @@ class PanelEventoScreen extends StatelessWidget {
                           );
                         },
                   child: const Text('Editar evento'),
+                ),
+                const SizedBox(height: 12),
+                ElevatedButton(
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => GestionarAnfitrionesScreen(
+                          eventoId: eventoId,
+                          empresaId: empresaId,
+                        ),
+                      ),
+                    );
+                  },
+                  child: const Text('Gestionar anfitriones'),
+                ),
+                const SizedBox(height: 12),
+                ElevatedButton(
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => SubirCroquisScreen(
+                          eventoId: eventoId,
+                          nombreEvento: nombreEvento,
+                        ),
+                      ),
+                    );
+                  },
+                  child: const Text('Subir / actualizar croquis'),
                 ),
                 const SizedBox(height: 12),
                 ElevatedButton(

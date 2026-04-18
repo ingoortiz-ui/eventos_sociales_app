@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import 'scanner.dart';
+import 'ver_croquis_screen.dart';
 
 class HostessEventosScreen extends StatelessWidget {
   final String empresaId;
@@ -91,44 +92,80 @@ class HostessEventosScreen extends StatelessWidget {
               final nombreEvento = (data['nombreEvento'] ?? '').toString();
               final tipoEvento = (data['tipoEvento'] ?? '').toString();
               final lugar = (data['lugar'] ?? '').toString();
+              final croquisUrl = (data['croquisUrl'] ?? '').toString();
               final activo = _eventoActivo(data);
               final horario = _rangoHorario(data);
               final estadoVisible =
                   activo ? 'Activo ahora' : 'Fuera de horario';
 
-              return ListTile(
-                title: Text(nombreEvento),
-                subtitle: Text(
-                  '$tipoEvento • $lugar\n$horario\n$estadoVisible',
-                ),
-                isThreeLine: true,
-                trailing: Icon(
-                  Icons.qr_code_scanner,
-                  color: activo ? null : Colors.grey,
-                ),
-                onTap: activo
-                    ? () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => ScannerScreen(
-                              eventoId: doc.id,
-                              nombreEvento: nombreEvento,
-                              horarioEvento: horario,
-                              estadoVisible: estadoVisible,
+              return Card(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Column(
+                    children: [
+                      ListTile(
+                        title: Text(nombreEvento),
+                        subtitle: Text(
+                          '$tipoEvento • $lugar\n$horario\n$estadoVisible',
+                        ),
+                        isThreeLine: true,
+                        trailing: Icon(
+                          Icons.qr_code_scanner,
+                          color: activo ? null : Colors.grey,
+                        ),
+                        onTap: activo
+                            ? () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => ScannerScreen(
+                                      eventoId: doc.id,
+                                      nombreEvento: nombreEvento,
+                                      horarioEvento: horario,
+                                      estadoVisible: estadoVisible,
+                                    ),
+                                  ),
+                                );
+                              }
+                            : () {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'Este evento está fuera de horario. Solo puedes escanear durante el horario del evento.',
+                                    ),
+                                  ),
+                                );
+                              },
+                      ),
+                      if (croquisUrl.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(
+                            left: 16,
+                            right: 16,
+                            bottom: 12,
+                          ),
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: OutlinedButton.icon(
+                              onPressed: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => VerCroquisScreen(
+                                      nombreEvento: nombreEvento,
+                                      croquisUrl: croquisUrl,
+                                    ),
+                                  ),
+                                );
+                              },
+                              icon: const Icon(Icons.map),
+                              label: const Text('Ver croquis de mesas'),
                             ),
                           ),
-                        );
-                      }
-                    : () {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                              'Este evento está fuera de horario. Solo puedes escanear durante el horario del evento.',
-                            ),
-                          ),
-                        );
-                      },
+                        ),
+                    ],
+                  ),
+                ),
               );
             },
           );

@@ -22,11 +22,36 @@ class _CrearEventoScreenState extends State<CrearEventoScreen> {
   final totalInvitadosController = TextEditingController();
 
   String tipoEvento = 'boda';
+  int cantidadAnfitriones = 2;
+
   DateTime? fechaInicio;
   TimeOfDay? horaInicio;
   DateTime? fechaFin;
   TimeOfDay? horaFin;
+
   bool saving = false;
+
+  void _actualizarCantidadPorTipo(String tipo) {
+    switch (tipo) {
+      case 'boda':
+        cantidadAnfitriones = 2;
+        break;
+      case 'aniversario':
+        cantidadAnfitriones = 2;
+        break;
+      case 'xv_anios':
+        cantidadAnfitriones = 1;
+        break;
+      case 'bautizo':
+        cantidadAnfitriones = 2;
+        break;
+      case 'graduacion':
+        cantidadAnfitriones = 3;
+        break;
+      default:
+        cantidadAnfitriones = 1;
+    }
+  }
 
   Future<void> seleccionarFechaInicio() async {
     final picked = await showDatePicker(
@@ -90,7 +115,8 @@ class _CrearEventoScreenState extends State<CrearEventoScreen> {
         lugar.isEmpty ||
         totalInvitados <= 0 ||
         inicio == null ||
-        fin == null) {
+        fin == null ||
+        cantidadAnfitriones <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Completa todos los campos del evento')),
       );
@@ -109,9 +135,11 @@ class _CrearEventoScreenState extends State<CrearEventoScreen> {
         'tipoEvento': tipoEvento,
         'lugar': lugar,
         'totalInvitados': totalInvitados,
+        'cantidadAnfitriones': cantidadAnfitriones,
         'fechaHoraInicio': Timestamp.fromDate(inicio),
         'fechaHoraFin': Timestamp.fromDate(fin),
         'estado': 'abierto',
+        'croquisUrl': '',
         'createdBy': adminUid,
         'createdAt': FieldValue.serverTimestamp(),
       });
@@ -140,6 +168,12 @@ class _CrearEventoScreenState extends State<CrearEventoScreen> {
     } finally {
       if (mounted) setState(() => saving = false);
     }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _actualizarCantidadPorTipo(tipoEvento);
   }
 
   @override
@@ -182,7 +216,12 @@ class _CrearEventoScreenState extends State<CrearEventoScreen> {
                   .map((t) => DropdownMenuItem(value: t, child: Text(t)))
                   .toList(),
               onChanged: (value) {
-                if (value != null) setState(() => tipoEvento = value);
+                if (value != null) {
+                  setState(() {
+                    tipoEvento = value;
+                    _actualizarCantidadPorTipo(value);
+                  });
+                }
               },
               decoration: const InputDecoration(labelText: 'Tipo de evento'),
             ),
@@ -197,6 +236,20 @@ class _CrearEventoScreenState extends State<CrearEventoScreen> {
               keyboardType: TextInputType.number,
               decoration: const InputDecoration(
                   labelText: 'Cantidad total de invitados'),
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              initialValue: cantidadAnfitriones.toString(),
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Cantidad de anfitriones principales',
+              ),
+              onChanged: (value) {
+                setState(() {
+                  cantidadAnfitriones =
+                      int.tryParse(value) ?? cantidadAnfitriones;
+                });
+              },
             ),
             const SizedBox(height: 20),
             ElevatedButton(
