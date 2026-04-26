@@ -26,8 +26,13 @@ class _CargaInvitadosTxtScreenState extends State<CargaInvitadosTxtScreen> {
 
   String empresaId = '';
   String nombreEvento = '';
+  String estadoEvento = 'abierto';
+
   int totalInvitados = 0;
   bool usaAnfitriones = false;
+
+  Timestamp? fechaHoraInicio;
+  Timestamp? fechaHoraFin;
 
   String? anfitrionSeleccionadoId;
   String anfitrionSeleccionadoNombre = '';
@@ -59,7 +64,39 @@ class _CargaInvitadosTxtScreenState extends State<CargaInvitadosTxtScreen> {
       nombreEvento = (data['nombreEvento'] ?? '').toString();
       totalInvitados = (data['totalInvitados'] ?? 0) as int;
       usaAnfitriones = data['usaAnfitriones'] == true;
+      estadoEvento = (data['estado'] ?? 'abierto').toString();
+      fechaHoraInicio =
+          data['fechaHoraInicio'] is Timestamp ? data['fechaHoraInicio'] : null;
+      fechaHoraFin =
+          data['fechaHoraFin'] is Timestamp ? data['fechaHoraFin'] : null;
       loadingEvento = false;
+    });
+  }
+
+  Future<void> _crearIndiceUsuarioEvento({
+    required String invitadoId,
+    required String email,
+    required String uidUsuario,
+    required String nombrePersona,
+    required String anfitrionId,
+  }) async {
+    if (email.trim().isEmpty) return;
+
+    await FirebaseFirestore.instance.collection('usuarios_eventos').add({
+      'empresaId': empresaId,
+      'eventoId': widget.eventoId,
+      'invitadoId': invitadoId,
+      'anfitrionId': anfitrionId,
+      'uidUsuario': uidUsuario,
+      'email': email,
+      'rolEvento': 'invitado',
+      'nombrePersona': nombrePersona,
+      'nombreEvento': nombreEvento,
+      'fechaHoraInicio': fechaHoraInicio,
+      'fechaHoraFin': fechaHoraFin,
+      'estadoManual': estadoEvento,
+      'activo': true,
+      'createdAt': FieldValue.serverTimestamp(),
     });
   }
 
@@ -318,6 +355,9 @@ class _CargaInvitadosTxtScreenState extends State<CargaInvitadosTxtScreen> {
         final qrPayload =
             '{"eventoId":"${widget.eventoId}","invitadoId":"${invitadoRef.id}"}';
 
+        final anfitrionIdFinal =
+            usaAnfitriones ? (anfitrionSeleccionadoId ?? '') : '';
+
         await invitadoRef.set({
           'nombre_invitado': nombre,
           'email_invitado': email,
@@ -325,7 +365,7 @@ class _CargaInvitadosTxtScreenState extends State<CargaInvitadosTxtScreen> {
           'usuarioId': uidUsuario,
           'eventoId': widget.eventoId,
           'empresaId': empresaId,
-          'anfitrionId': usaAnfitriones ? (anfitrionSeleccionadoId ?? '') : '',
+          'anfitrionId': anfitrionIdFinal,
           'anfitrionNombre': usaAnfitriones ? anfitrionSeleccionadoNombre : '',
           'anfitrionUid': usaAnfitriones ? anfitrionUid : '',
           'estado_asistencia': 'pendiente',
@@ -337,6 +377,14 @@ class _CargaInvitadosTxtScreenState extends State<CargaInvitadosTxtScreen> {
           'puedeGestionarInvitados': false,
           'createdAt': FieldValue.serverTimestamp(),
         });
+
+        await _crearIndiceUsuarioEvento(
+          invitadoId: invitadoRef.id,
+          email: email,
+          uidUsuario: uidUsuario,
+          nombrePersona: nombre,
+          anfitrionId: anfitrionIdFinal,
+        );
 
         emailsExistentes.add(email);
         emailsEnArchivo.add(email);

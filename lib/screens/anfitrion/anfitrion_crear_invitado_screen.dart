@@ -24,122 +24,141 @@ class _AnfitrionCrearInvitadoScreenState
   final emailController = TextEditingController();
   final mesaController = TextEditingController();
 
-  bool saving = false;
+  bool guardando = false;
+
+  String nombreEvento = '';
+  Timestamp? fechaHoraInicio;
+  Timestamp? fechaHoraFin;
+  String estadoEvento = 'abierto';
+
   String anfitrionNombre = '';
   String anfitrionUid = '';
-  int maxInvitados = 0;
 
   String _normalizarCorreo(String correo) {
     return correo.trim().toLowerCase();
   }
 
-  Future<void> _cargarAnfitrion() async {
-    final doc = await FirebaseFirestore.instance
+  Future<void> _cargarEventoYAnfitrion() async {
+    final eventoDoc = await FirebaseFirestore.instance
+        .collection('eventos')
+        .doc(widget.eventoId)
+        .get();
+
+    final anfitrionDoc = await FirebaseFirestore.instance
         .collection('anfitriones_evento')
         .doc(widget.anfitrionId)
         .get();
 
-    final data = doc.data() ?? {};
+    final eventoData = eventoDoc.data() ?? {};
+    final anfitrionData = anfitrionDoc.data() ?? {};
+
     setState(() {
-      anfitrionNombre = (data['nombre'] ?? '').toString();
-      anfitrionUid = (data['uidUsuario'] ?? '').toString();
-      maxInvitados = (data['maxInvitados'] ?? 0) as int;
+      nombreEvento = (eventoData['nombreEvento'] ?? '').toString();
+      fechaHoraInicio = eventoData['fechaHoraInicio'] is Timestamp
+          ? eventoData['fechaHoraInicio']
+          : null;
+      fechaHoraFin = eventoData['fechaHoraFin'] is Timestamp
+          ? eventoData['fechaHoraFin']
+          : null;
+      estadoEvento = (eventoData['estado'] ?? 'abierto').toString();
+
+      anfitrionNombre = (anfitrionData['nombre'] ?? '').toString();
+      anfitrionUid = (anfitrionData['uidUsuario'] ?? '').toString();
     });
   }
 
-  Future<bool> _invitadoYaExiste(String correo) async {
+  Future<void> _crearIndice({
+    required String invitadoId,
+    required String email,
+    required String uidUsuario,
+    required String nombre,
+  }) async {
+    if (email.trim().isEmpty) return;
+
+    await FirebaseFirestore.instance.collection('usuarios_eventos').add({
+      'empresaId': widget.empresaId,
+      'eventoId': widget.eventoId,
+      'invitadoId': invitadoId,
+      'anfitrionId': widget.anfitrionId,
+      'uidUsuario': uidUsuario,
+      'email': email,
+      'rolEvento': 'invitado',
+      'nombrePersona': nombre,
+      'nombreEvento': nombreEvento,
+      'fechaHoraInicio': fechaHoraInicio,
+      'fechaHoraFin': fechaHoraFin,
+      'estadoManual': estadoEvento,
+      'activo': true,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  Future<Map<String, dynamic>?> _buscarUsuarioPorCorreo(String email) async {
     final snap = await FirebaseFirestore.instance
-        .collection('eventos')
-        .doc(widget.eventoId)
-        .collection('invitados')
-        .where('email_invitado', isEqualTo: _normalizarCorreo(correo))
+        .collection('usuarios')
+        .where('empresaId', isEqualTo: widget.empresaId)
+        .where('email', isEqualTo: email)
         .limit(1)
         .get();
 
-    return snap.docs.isNotEmpty;
+    if (snap.docs.isEmpty) return null;
+
+    return {
+      'uid': snap.docs.first.id,
+      'data': snap.docs.first.data(),
+    };
   }
 
-  Future<int> _totalInvitadosAnfitrion() async {
-    final snap = await FirebaseFirestore.instance
-        .collection('eventos')
-        .doc(widget.eventoId)
-        .collection('invitados')
-        .where('anfitrionId', isEqualTo: widget.anfitrionId)
-        .where('esAnfitrion', isEqualTo: false)
-        .get();
-
-    return snap.docs.length;
-  }
-
-  Future<void> guardar() async {
+  Future<void> _guardar() async {
     final nombre = nombreController.text.trim();
     final email = _normalizarCorreo(emailController.text);
     final mesa = mesaController.text.trim();
 
-    if (nombre.isEmpty || email.isEmpty || mesa.isEmpty) {
+    if (nombre.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Completa nombre, correo y mesa')),
+        const SnackBar(content: Text('Ingresa el nombre')),
       );
       return;
     }
 
-    setState(() => saving = true);
+    setState(() => guardando = true);
 
     try {
-      final yaExiste = await _invitadoYaExiste(email);
-      if (yaExiste) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('Ese correo ya está registrado en este evento')),
-        );
-        setState(() => saving = false);
-        return;
-      }
-
-      final totalActual = await _totalInvitadosAnfitrion();
-      if (totalActual >= maxInvitados) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text('Ya alcanzaste tu cupo máximo: $maxInvitados')),
-        );
-        setState(() => saving = false);
-        return;
-      }
-
       String uidUsuario = '';
-      final usuarioSnap = await FirebaseFirestore.instance
-          .collection('usuarios')
-          .where('empresaId', isEqualTo: widget.empresaId)
-          .where('email', isEqualTo: email)
-          .limit(1)
-          .get();
+      bool existeEnSistema = false;
 
-      if (usuarioSnap.docs.isNotEmpty) {
-        uidUsuario = usuarioSnap.docs.first.id;
-      } else {
-        final nuevoUsuarioRef =
-            FirebaseFirestore.instance.collection('usuarios').doc();
-        await nuevoUsuarioRef.set({
-          'empresaId': widget.empresaId,
-          'nombre': nombre,
-          'email': email,
-          'rol': 'invitado',
-          'activo': true,
-          'createdAt': FieldValue.serverTimestamp(),
-        });
-        uidUsuario = nuevoUsuarioRef.id;
+      if (email.isNotEmpty) {
+        final usuarioExistente = await _buscarUsuarioPorCorreo(email);
+
+        if (usuarioExistente != null) {
+          uidUsuario = (usuarioExistente['uid'] ?? '').toString();
+          existeEnSistema = true;
+        } else {
+          final nuevoUsuarioRef =
+              FirebaseFirestore.instance.collection('usuarios').doc();
+
+          await nuevoUsuarioRef.set({
+            'empresaId': widget.empresaId,
+            'nombre': nombre,
+            'email': email,
+            'rol': 'invitado',
+            'activo': true,
+            'createdAt': FieldValue.serverTimestamp(),
+          });
+
+          uidUsuario = nuevoUsuarioRef.id;
+        }
       }
 
-      final invitadosRef = FirebaseFirestore.instance
+      final ref = FirebaseFirestore.instance
           .collection('eventos')
           .doc(widget.eventoId)
-          .collection('invitados');
+          .collection('invitados')
+          .doc();
 
-      final docRef = invitadosRef.doc();
-      final qrPayload =
-          '{"eventoId":"${widget.eventoId}","invitadoId":"${docRef.id}"}';
+      final qr = '{"eventoId":"${widget.eventoId}","invitadoId":"${ref.id}"}';
 
-      await docRef.set({
+      await ref.set({
         'nombre_invitado': nombre,
         'email_invitado': email,
         'mesa': mesa,
@@ -150,32 +169,39 @@ class _AnfitrionCrearInvitadoScreenState
         'anfitrionNombre': anfitrionNombre,
         'anfitrionUid': anfitrionUid,
         'estado_asistencia': 'pendiente',
-        'qr_code': qrPayload,
+        'qr_code': qr,
+        'existeEnSistema': existeEnSistema,
         'creadoPorRol': 'anfitrion',
         'esAnfitrion': false,
+        'cuentaComoInvitado': true,
         'puedeGestionarInvitados': false,
         'createdAt': FieldValue.serverTimestamp(),
       });
 
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Invitado registrado correctamente')),
+      /// 🔥 CREAR ÍNDICE
+      await _crearIndice(
+        invitadoId: ref.id,
+        email: email,
+        uidUsuario: uidUsuario,
+        nombre: nombre,
       );
+
+      if (!mounted) return;
+
       Navigator.pop(context);
     } catch (e) {
-      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error guardando invitado: $e')),
+        SnackBar(content: Text('Error: $e')),
       );
     } finally {
-      if (mounted) setState(() => saving = false);
+      if (mounted) setState(() => guardando = false);
     }
   }
 
   @override
   void initState() {
     super.initState();
-    _cargarAnfitrion();
+    _cargarEventoYAnfitrion();
   }
 
   @override
@@ -194,31 +220,24 @@ class _AnfitrionCrearInvitadoScreenState
       ),
       body: Padding(
         padding: const EdgeInsets.all(16),
-        child: ListView(
+        child: Column(
           children: [
-            Text('Anfitrión: $anfitrionNombre'),
-            Text('Cupo máximo: $maxInvitados'),
-            const SizedBox(height: 16),
             TextField(
               controller: nombreController,
-              decoration:
-                  const InputDecoration(labelText: 'Nombre del invitado'),
+              decoration: const InputDecoration(labelText: 'Nombre'),
             ),
-            const SizedBox(height: 12),
             TextField(
               controller: emailController,
-              decoration:
-                  const InputDecoration(labelText: 'Correo del invitado'),
+              decoration: const InputDecoration(labelText: 'Email'),
             ),
-            const SizedBox(height: 12),
             TextField(
               controller: mesaController,
               decoration: const InputDecoration(labelText: 'Mesa'),
             ),
             const SizedBox(height: 20),
             ElevatedButton(
-              onPressed: saving ? null : guardar,
-              child: Text(saving ? 'Guardando...' : 'Guardar invitado'),
+              onPressed: guardando ? null : _guardar,
+              child: Text(guardando ? 'Guardando...' : 'Guardar'),
             ),
           ],
         ),

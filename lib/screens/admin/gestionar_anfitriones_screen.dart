@@ -35,6 +35,9 @@ class _GestionarAnfitrionesScreenState
   int totalInvitados = 0;
   bool usaAnfitriones = false;
   int cantidadAnfitriones = 0;
+  Timestamp? fechaHoraInicio;
+  Timestamp? fechaHoraFin;
+  String estadoEvento = 'abierto';
 
   String _normalizarCorreo(String correo) {
     return correo.trim().toLowerCase();
@@ -53,7 +56,40 @@ class _GestionarAnfitrionesScreenState
       totalInvitados = (data['totalInvitados'] ?? 0) as int;
       usaAnfitriones = data['usaAnfitriones'] == true;
       cantidadAnfitriones = (data['cantidadAnfitriones'] ?? 0) as int;
+      fechaHoraInicio =
+          data['fechaHoraInicio'] is Timestamp ? data['fechaHoraInicio'] : null;
+      fechaHoraFin =
+          data['fechaHoraFin'] is Timestamp ? data['fechaHoraFin'] : null;
+      estadoEvento = (data['estado'] ?? 'abierto').toString();
       loadingEvento = false;
+    });
+  }
+
+  Future<void> _crearIndiceUsuarioEvento({
+    required String email,
+    required String uidUsuario,
+    required String nombrePersona,
+    required String anfitrionId,
+    required String invitadoEspejoId,
+  }) async {
+    final indiceRef =
+        FirebaseFirestore.instance.collection('usuarios_eventos').doc();
+
+    await indiceRef.set({
+      'empresaId': widget.empresaId,
+      'eventoId': widget.eventoId,
+      'invitadoId': invitadoEspejoId,
+      'anfitrionId': anfitrionId,
+      'uidUsuario': uidUsuario,
+      'email': email,
+      'rolEvento': 'anfitrion',
+      'nombrePersona': nombrePersona,
+      'nombreEvento': nombreEvento,
+      'fechaHoraInicio': fechaHoraInicio,
+      'fechaHoraFin': fechaHoraFin,
+      'estadoManual': estadoEvento,
+      'activo': true,
+      'createdAt': FieldValue.serverTimestamp(),
     });
   }
 
@@ -288,6 +324,14 @@ class _GestionarAnfitrionesScreenState
         'qr_code': qrPayload,
       });
 
+      await _crearIndiceUsuarioEvento(
+        email: email,
+        uidUsuario: uidUsuario,
+        nombrePersona: nombre,
+        anfitrionId: anfitrionRef.id,
+        invitadoEspejoId: invitadoEspejoRef.id,
+      );
+
       if (!mounted) return;
 
       nombreController.clear();
@@ -347,6 +391,21 @@ class _GestionarAnfitrionesScreenState
             .collection('invitados')
             .doc(invitadoEspejoId)
             .delete();
+      }
+
+      final indices = await FirebaseFirestore.instance
+          .collection('usuarios_eventos')
+          .where('empresaId', isEqualTo: widget.empresaId)
+          .where('eventoId', isEqualTo: widget.eventoId)
+          .where('anfitrionId', isEqualTo: anfitrionId)
+          .where('rolEvento', isEqualTo: 'anfitrion')
+          .get();
+
+      for (final doc in indices.docs) {
+        await doc.reference.update({
+          'activo': false,
+          'deletedAt': FieldValue.serverTimestamp(),
+        });
       }
 
       if (!mounted) return;

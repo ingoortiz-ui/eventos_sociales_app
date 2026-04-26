@@ -5,4 +5,5 @@ Samara|prueba|1|OrtPach
 correo repetido|invitado0@evento.com|1|OrtPach
 Okky|invitado1@evento.com|1|OrtPach
 Valeriainvitado2@evento.com1|OrtPach
-Samara|prueba|1|OrtPach
+Tata|prueba|1|OrtPach
+Tita|prueba|1|OrtPach

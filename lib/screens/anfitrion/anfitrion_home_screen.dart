@@ -8,15 +8,14 @@ import 'anfitrion_evento_detalle_screen.dart';
 class AnfitrionHomeScreen extends StatelessWidget {
   const AnfitrionHomeScreen({super.key});
 
-  String _normalizeEmail(String email) => email.trim().toLowerCase();
+  String _normalizarCorreo(String email) => email.trim().toLowerCase();
 
   Future<Map<String, String>> _contexto() async {
     final user = FirebaseAuth.instance.currentUser;
+
     if (user == null) {
       return {'email': '', 'empresaId': '', 'uid': ''};
     }
-
-    final email = _normalizeEmail(user.email ?? '');
 
     final userDoc = await FirebaseFirestore.instance
         .collection('usuarios')
@@ -26,230 +25,104 @@ class AnfitrionHomeScreen extends StatelessWidget {
     final data = userDoc.data() ?? {};
 
     return {
-      'email': email,
+      'email': _normalizarCorreo(user.email ?? ''),
       'empresaId': (data['empresaId'] ?? '').toString(),
       'uid': user.uid,
     };
   }
 
-  Stream<QuerySnapshot<Map<String, dynamic>>> _streamAnfitrion(
-    String empresaId,
-    String email,
-  ) {
-    return FirebaseFirestore.instance
-        .collection('anfitriones_evento')
-        .where('empresaId', isEqualTo: empresaId)
-        .where('email', isEqualTo: email)
-        .where('activo', isEqualTo: true)
-        .snapshots();
+  DateTime? _parseFecha(dynamic value) {
+    if (value == null) return null;
+    if (value is Timestamp) return value.toDate();
+
+    if (value is String) {
+      try {
+        return DateTime.parse(value);
+      } catch (_) {
+        return null;
+      }
+    }
+
+    return null;
   }
 
-  String _estadoVisual(Map<String, dynamic> evento) {
-    final estado = (evento['estado'] ?? 'abierto').toString();
-    final inicioTs = evento['fechaHoraInicio'];
-    final finTs = evento['fechaHoraFin'];
+  String _estadoVisual(Map<String, dynamic> data) {
+    final estadoManual =
+        (data['estadoManual'] ?? data['estado'] ?? 'abierto').toString();
 
-    if (estado == 'cerrado' ||
-        estado == 'archivado' ||
-        estado == 'finalizado') {
-      return estado;
-    }
+    if (estadoManual == 'cerrado') return 'cerrado';
 
-    if (inicioTs is Timestamp && finTs is Timestamp) {
-      final now = DateTime.now();
-      final inicio = inicioTs.toDate();
-      final fin = finTs.toDate();
+    final inicio = _parseFecha(data['fechaHoraInicio']);
+    final fin = _parseFecha(data['fechaHoraFin']);
 
-      if (now.isBefore(inicio)) return 'proximo';
-      if (now.isAfter(fin)) return 'finalizado';
-      return 'activo_ahora';
-    }
+    if (inicio == null || fin == null) return 'proximo';
 
-    return estado;
+    final now = DateTime.now();
+
+    if (now.isBefore(inicio)) return 'proximo';
+    if (now.isAfter(fin)) return 'finalizado';
+
+    return 'activo';
   }
 
   String _textoEstado(String estado) {
     switch (estado) {
-      case 'activo_ahora':
-        return 'Activo ahora';
+      case 'activo':
+        return 'Activo';
       case 'proximo':
         return 'Próximo';
-      case 'cerrado':
-        return 'Cerrado';
-      case 'archivado':
-        return 'Archivado';
       case 'finalizado':
         return 'Finalizado';
-      case 'abierto':
-        return 'Abierto';
+      case 'cerrado':
+        return 'Cerrado';
       default:
         return estado;
     }
   }
 
-  Future<Map<String, dynamic>> _cargarTarjetaEventoAnfitrion(
-    QueryDocumentSnapshot<Map<String, dynamic>> anfitrionDoc,
-  ) async {
-    final eventoId = (anfitrionDoc.data()['eventoId'] ?? '').toString();
-
-    final eventoSnap = await FirebaseFirestore.instance
-        .collection('eventos')
-        .doc(eventoId)
-        .get();
-
-    final evento = eventoSnap.data() ?? {};
-
-    final espejoSnap = await FirebaseFirestore.instance
-        .collection('eventos')
-        .doc(eventoId)
-        .collection('invitados')
-        .where('anfitrionId', isEqualTo: anfitrionDoc.id)
-        .where('esAnfitrion', isEqualTo: true)
-        .limit(1)
-        .get();
-
-    final espejo = espejoSnap.docs.isNotEmpty
-        ? espejoSnap.docs.first.data()
-        : <String, dynamic>{};
-
-    return {
-      'eventoId': eventoId,
-      'evento': evento,
-      'espejo': espejo,
-    };
-  }
-
-  Future<List<Map<String, dynamic>>> _cargarEventosComoInvitado(
-    String email,
-    String empresaId,
-    String uid,
-  ) async {
-    final db = FirebaseFirestore.instance;
-
-    final eventosSnap = await db
-        .collection('eventos')
-        .where('empresaId', isEqualTo: empresaId)
-        .get();
-
-    final List<Map<String, dynamic>> resultado = [];
-
-    for (final eventoDoc in eventosSnap.docs) {
-      final invitadosPorCorreo = await db
-          .collection('eventos')
-          .doc(eventoDoc.id)
-          .collection('invitados')
-          .where('email_invitado', isEqualTo: email)
-          .get();
-
-      final invitadosPorUid = uid.isEmpty
-          ? <QueryDocumentSnapshot<Map<String, dynamic>>>[]
-          : (await db
-                  .collection('eventos')
-                  .doc(eventoDoc.id)
-                  .collection('invitados')
-                  .where('usuarioId', isEqualTo: uid)
-                  .get())
-              .docs;
-
-      final vistos = <String>{};
-
-      for (final invitadoDoc in [
-        ...invitadosPorCorreo.docs,
-        ...invitadosPorUid,
-      ]) {
-        if (vistos.contains(invitadoDoc.id)) continue;
-        vistos.add(invitadoDoc.id);
-
-        final invitadoData = invitadoDoc.data();
-
-        final esAnfitrionEspejo = invitadoData['esAnfitrion'] == true;
-        if (esAnfitrionEspejo) continue;
-
-        resultado.add({
-          'eventoId': eventoDoc.id,
-          'evento': eventoDoc.data(),
-          'invitadoId': invitadoDoc.id,
-          'invitado': invitadoData,
-        });
-      }
-    }
-
-    resultado.sort((a, b) {
-      final aEvento = (a['evento'] ?? {}) as Map<String, dynamic>;
-      final bEvento = (b['evento'] ?? {}) as Map<String, dynamic>;
-
-      final aInicio = aEvento['fechaHoraInicio'];
-      final bInicio = bEvento['fechaHoraInicio'];
-
-      if (aInicio is Timestamp && bInicio is Timestamp) {
-        return bInicio.compareTo(aInicio);
-      }
-      return 0;
-    });
-
-    return resultado;
-  }
-
-  List<QueryDocumentSnapshot<Map<String, dynamic>>> _filtrarAnfitrion(
+  List<QueryDocumentSnapshot<Map<String, dynamic>>> _filtrar(
     List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
-    Map<String, Map<String, dynamic>> eventos,
     String tipo,
   ) {
     return docs.where((doc) {
-      final evento = eventos[(doc.data()['eventoId'] ?? '').toString()] ?? {};
-      final estadoVisual = _estadoVisual(evento);
+      final estado = _estadoVisual(doc.data());
 
       switch (tipo) {
         case 'activos':
-          return estadoVisual == 'activo_ahora' || estadoVisual == 'abierto';
+          return estado == 'activo';
         case 'proximos':
-          return estadoVisual == 'proximo';
+          return estado == 'proximo';
         case 'finalizados':
-          return estadoVisual == 'finalizado';
+          return estado == 'finalizado';
         case 'cerrados':
-          return estadoVisual == 'cerrado' || estadoVisual == 'archivado';
+          return estado == 'cerrado';
         default:
           return false;
       }
     }).toList();
   }
 
-  List<Map<String, dynamic>> _filtrarInvitado(
-    List<Map<String, dynamic>> items,
-    String tipo,
-  ) {
-    return items.where((item) {
-      final evento = (item['evento'] ?? {}) as Map<String, dynamic>;
-      final estadoVisual = _estadoVisual(evento);
-
-      switch (tipo) {
-        case 'activos':
-          return estadoVisual == 'activo_ahora' || estadoVisual == 'abierto';
-        case 'proximos':
-          return estadoVisual == 'proximo';
-        case 'finalizados':
-          return estadoVisual == 'finalizado';
-        case 'cerrados':
-          return estadoVisual == 'cerrado' || estadoVisual == 'archivado';
-        default:
-          return false;
-      }
-    }).toList();
-  }
-
-  Future<Map<String, Map<String, dynamic>>> _cargarEventosMap(
+  List<QueryDocumentSnapshot<Map<String, dynamic>>> _porRol(
     List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
-  ) async {
-    final db = FirebaseFirestore.instance;
-    final map = <String, Map<String, dynamic>>{};
+    String rolEvento,
+  ) {
+    return docs.where((doc) {
+      return (doc.data()['rolEvento'] ?? '').toString() == rolEvento;
+    }).toList();
+  }
 
-    for (final doc in docs) {
-      final id = (doc.data()['eventoId'] ?? '').toString();
-      final eventoDoc = await db.collection('eventos').doc(id).get();
-      map[id] = eventoDoc.data() ?? {};
-    }
+  void _ordenarPorFecha(
+      List<QueryDocumentSnapshot<Map<String, dynamic>>> docs) {
+    docs.sort((a, b) {
+      final fechaA = _parseFecha(a.data()['fechaHoraInicio']);
+      final fechaB = _parseFecha(b.data()['fechaHoraInicio']);
 
-    return map;
+      if (fechaA == null && fechaB == null) return 0;
+      if (fechaA == null) return 1;
+      if (fechaB == null) return -1;
+
+      return fechaA.compareTo(fechaB);
+    });
   }
 
   Widget _seccionAnfitrion(
@@ -264,56 +137,40 @@ class AnfitrionHomeScreen extends StatelessWidget {
       );
     }
 
+    _ordenarPorFecha(docs);
+
     return Column(
       children: docs.map((doc) {
-        final anfitrionData = doc.data();
-        final nombreAnfitrion = (anfitrionData['nombre'] ?? '').toString();
-        final cupo = (anfitrionData['maxInvitados'] ?? 0).toString();
+        final data = doc.data();
 
-        return FutureBuilder<Map<String, dynamic>>(
-          future: _cargarTarjetaEventoAnfitrion(doc),
-          builder: (context, snap) {
-            if (!snap.hasData) {
-              return const ListTile(title: Text('Cargando evento...'));
-            }
+        final eventoId = (data['eventoId'] ?? '').toString();
+        final anfitrionId = (data['anfitrionId'] ?? '').toString();
+        final nombreEvento = (data['nombreEvento'] ?? 'Evento').toString();
+        final nombrePersona = (data['nombrePersona'] ?? '').toString();
+        final estado = _textoEstado(_estadoVisual(data));
 
-            final data = snap.data!;
-            final eventoId = (data['eventoId'] ?? '').toString();
-            final evento = (data['evento'] ?? {}) as Map<String, dynamic>;
-            final espejo = (data['espejo'] ?? {}) as Map<String, dynamic>;
-
-            final nombreEvento =
-                (evento['nombreEvento'] ?? 'Evento').toString();
-            final lugar = (evento['lugar'] ?? '').toString();
-            final estadoVisual = _estadoVisual(evento);
-            final accesoPropio =
-                (espejo['estado_asistencia'] ?? 'pendiente').toString();
-
-            return ListTile(
-              title: Text(nombreEvento),
-              subtitle: Text(
-                'Modo: anfitrión\n'
-                'Anfitrión: $nombreAnfitrion\n'
-                'Lugar: $lugar\n'
-                'Cupo: $cupo\n'
-                'Estado: ${_textoEstado(estadoVisual)}\n'
-                'Mi acceso: $accesoPropio',
-              ),
-              isThreeLine: true,
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => AnfitrionEventoDetalleScreen(
-                      eventoId: eventoId,
-                      empresaId: empresaId,
-                      anfitrionId: doc.id,
+        return ListTile(
+          title: Text(nombreEvento),
+          subtitle: Text(
+            'Modo: anfitrión\n'
+            'Anfitrión: $nombrePersona\n'
+            'Estado: $estado',
+          ),
+          isThreeLine: true,
+          onTap: eventoId.isEmpty || anfitrionId.isEmpty
+              ? null
+              : () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => AnfitrionEventoDetalleScreen(
+                        eventoId: eventoId,
+                        empresaId: empresaId,
+                        anfitrionId: anfitrionId,
+                      ),
                     ),
-                  ),
-                );
-              },
-            );
-          },
+                  );
+                },
         );
       }).toList(),
     );
@@ -321,50 +178,48 @@ class AnfitrionHomeScreen extends StatelessWidget {
 
   Widget _seccionInvitado(
     BuildContext context,
-    List<Map<String, dynamic>> items,
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
   ) {
-    if (items.isEmpty) {
+    if (docs.isEmpty) {
       return const Padding(
         padding: EdgeInsets.all(12),
         child: Text('No tienes eventos como invitado'),
       );
     }
 
-    return Column(
-      children: items.map((item) {
-        final eventoId = (item['eventoId'] ?? '').toString();
-        final invitadoId = (item['invitadoId'] ?? '').toString();
-        final evento = (item['evento'] ?? {}) as Map<String, dynamic>;
-        final invitado = (item['invitado'] ?? {}) as Map<String, dynamic>;
+    _ordenarPorFecha(docs);
 
-        final nombreEvento = (evento['nombreEvento'] ?? 'Evento').toString();
-        final lugar = (evento['lugar'] ?? '').toString();
-        final mesa = (invitado['mesa'] ?? '').toString();
-        final acceso =
-            (invitado['estado_asistencia'] ?? 'pendiente').toString();
-        final estado = _textoEstado(_estadoVisual(evento));
+    return Column(
+      children: docs.map((doc) {
+        final data = doc.data();
+
+        final eventoId = (data['eventoId'] ?? '').toString();
+        final invitadoId = (data['invitadoId'] ?? '').toString();
+        final nombreEvento = (data['nombreEvento'] ?? 'Evento').toString();
+        final nombrePersona = (data['nombrePersona'] ?? '').toString();
+        final estado = _textoEstado(_estadoVisual(data));
 
         return ListTile(
           title: Text(nombreEvento),
           subtitle: Text(
             'Modo: invitado\n'
-            'Lugar: $lugar\n'
-            'Mesa: $mesa\n'
-            'Estado: $estado\n'
-            'Mi acceso: $acceso',
+            'Invitado: $nombrePersona\n'
+            'Estado: $estado',
           ),
           isThreeLine: true,
-          onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => InvitadoEventoDetalleScreen(
-                  eventoId: eventoId,
-                  invitadoId: invitadoId,
-                ),
-              ),
-            );
-          },
+          onTap: eventoId.isEmpty || invitadoId.isEmpty
+              ? null
+              : () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => InvitadoEventoDetalleScreen(
+                        eventoId: eventoId,
+                        invitadoId: invitadoId,
+                      ),
+                    ),
+                  );
+                },
         );
       }).toList(),
     );
@@ -372,10 +227,12 @@ class AnfitrionHomeScreen extends StatelessWidget {
 
   Widget _buildTab(
     BuildContext context,
-    List<QueryDocumentSnapshot<Map<String, dynamic>>> anfitrionDocs,
-    List<Map<String, dynamic>> invitadoItems,
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
     String empresaId,
   ) {
+    final anfitrionDocs = _porRol(docs, 'anfitrion');
+    final invitadoDocs = _porRol(docs, 'invitado');
+
     return ListView(
       children: [
         const Padding(
@@ -394,7 +251,7 @@ class AnfitrionHomeScreen extends StatelessWidget {
             style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
           ),
         ),
-        _seccionInvitado(context, invitadoItems),
+        _seccionInvitado(context, invitadoDocs),
       ],
     );
   }
@@ -404,17 +261,33 @@ class AnfitrionHomeScreen extends StatelessWidget {
     return FutureBuilder<Map<String, String>>(
       future: _contexto(),
       builder: (context, ctxSnap) {
-        if (!ctxSnap.hasData) {
+        if (ctxSnap.connectionState == ConnectionState.waiting) {
           return const Scaffold(
             body: Center(child: CircularProgressIndicator()),
           );
         }
 
-        final email = ctxSnap.data!['email']!;
-        final empresaId = ctxSnap.data!['empresaId']!;
-        final uid = ctxSnap.data!['uid']!;
+        if (ctxSnap.hasError) {
+          return Scaffold(
+            appBar: AppBar(title: const Text('Mis eventos')),
+            body: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text('Error cargando usuario: ${ctxSnap.error}'),
+              ),
+            ),
+          );
+        }
 
-        final stream = _streamAnfitrion(empresaId, email);
+        final email = ctxSnap.data?['email'] ?? '';
+        final empresaId = ctxSnap.data?['empresaId'] ?? '';
+
+        final stream = FirebaseFirestore.instance
+            .collection('usuarios_eventos')
+            .where('empresaId', isEqualTo: empresaId)
+            .where('email', isEqualTo: email)
+            .where('activo', isEqualTo: true)
+            .snapshots();
 
         return DefaultTabController(
           length: 4,
@@ -440,67 +313,37 @@ class AnfitrionHomeScreen extends StatelessWidget {
             ),
             body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
               stream: stream,
-              builder: (context, anfitrionSnap) {
-                if (!anfitrionSnap.hasData) {
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
                 }
 
-                final anfitrionDocs = anfitrionSnap.data!.docs;
+                if (snapshot.hasError) {
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Text(
+                        'Error cargando eventos: ${snapshot.error}',
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  );
+                }
 
-                return FutureBuilder<Map<String, dynamic>>(
-                  future: () async {
-                    final eventosMap = await _cargarEventosMap(anfitrionDocs);
-                    final invitadoItems =
-                        await _cargarEventosComoInvitado(email, empresaId, uid);
+                final docs = snapshot.data?.docs ?? [];
 
-                    return {
-                      'eventosMap': eventosMap,
-                      'invitadoItems': invitadoItems,
-                    };
-                  }(),
-                  builder: (context, extraSnap) {
-                    if (!extraSnap.hasData) {
-                      return const Center(child: CircularProgressIndicator());
-                    }
+                final activos = _filtrar(docs, 'activos');
+                final proximos = _filtrar(docs, 'proximos');
+                final finalizados = _filtrar(docs, 'finalizados');
+                final cerrados = _filtrar(docs, 'cerrados');
 
-                    final eventosMap = (extraSnap.data!['eventosMap'] ?? {})
-                        as Map<String, Map<String, dynamic>>;
-                    final invitadoItems = (extraSnap.data!['invitadoItems'] ??
-                        []) as List<Map<String, dynamic>>;
-
-                    return TabBarView(
-                      children: [
-                        _buildTab(
-                          context,
-                          _filtrarAnfitrion(
-                              anfitrionDocs, eventosMap, 'activos'),
-                          _filtrarInvitado(invitadoItems, 'activos'),
-                          empresaId,
-                        ),
-                        _buildTab(
-                          context,
-                          _filtrarAnfitrion(
-                              anfitrionDocs, eventosMap, 'proximos'),
-                          _filtrarInvitado(invitadoItems, 'proximos'),
-                          empresaId,
-                        ),
-                        _buildTab(
-                          context,
-                          _filtrarAnfitrion(
-                              anfitrionDocs, eventosMap, 'finalizados'),
-                          _filtrarInvitado(invitadoItems, 'finalizados'),
-                          empresaId,
-                        ),
-                        _buildTab(
-                          context,
-                          _filtrarAnfitrion(
-                              anfitrionDocs, eventosMap, 'cerrados'),
-                          _filtrarInvitado(invitadoItems, 'cerrados'),
-                          empresaId,
-                        ),
-                      ],
-                    );
-                  },
+                return TabBarView(
+                  children: [
+                    _buildTab(context, activos, empresaId),
+                    _buildTab(context, proximos, empresaId),
+                    _buildTab(context, finalizados, empresaId),
+                    _buildTab(context, cerrados, empresaId),
+                  ],
                 );
               },
             ),

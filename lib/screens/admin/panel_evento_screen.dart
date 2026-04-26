@@ -3,12 +3,12 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
-import 'gestionar_anfitriones_screen.dart';
-import 'crear_invitado.dart';
 import 'carga_invitados_txt_screen.dart';
+import 'crear_invitado.dart';
+import 'editar_evento_screen.dart';
+import 'gestionar_anfitriones_screen.dart';
 import 'lista_invitados_screen.dart';
 import 'reporte_evento_screen.dart';
-import 'editar_evento_screen.dart';
 
 class PanelEventoScreen extends StatefulWidget {
   final String eventoId;
@@ -58,6 +58,12 @@ class _PanelEventoScreenState extends State<PanelEventoScreen> {
       setState(() => subiendoCroquis = true);
 
       final extension = file.extension ?? 'jpg';
+      final contentType = extension.toLowerCase() == 'png'
+          ? 'image/png'
+          : extension.toLowerCase() == 'webp'
+              ? 'image/webp'
+              : 'image/jpeg';
+
       final path =
           'empresas/${widget.empresaId}/eventos/${widget.eventoId}/croquis_mesas.$extension';
 
@@ -65,7 +71,7 @@ class _PanelEventoScreenState extends State<PanelEventoScreen> {
 
       await ref.putData(
         bytes,
-        SettableMetadata(contentType: 'image/$extension'),
+        SettableMetadata(contentType: contentType),
       );
 
       final url = await ref.getDownloadURL();
@@ -113,6 +119,11 @@ class _PanelEventoScreenState extends State<PanelEventoScreen> {
     );
   }
 
+  bool _eventoCerrado(Map<String, dynamic> data) {
+    final estado = (data['estado'] ?? '').toString();
+    return estado == 'cerrado' || data['archivado'] == true;
+  }
+
   @override
   Widget build(BuildContext context) {
     final eventoRef =
@@ -141,6 +152,7 @@ class _PanelEventoScreenState extends State<PanelEventoScreen> {
               (data['nombreEvento'] ?? widget.nombreEvento ?? 'Evento')
                   .toString();
           final lugar = (data['lugar'] ?? '').toString();
+          final estado = (data['estado'] ?? 'abierto').toString();
           final usaAnfitriones = data['usaAnfitriones'] == true;
           final totalInvitados = (data['totalInvitados'] ?? 0).toString();
           final cantidadAnfitriones =
@@ -150,9 +162,12 @@ class _PanelEventoScreenState extends State<PanelEventoScreen> {
           final inicio = data['fechaHoraInicio'] is Timestamp
               ? data['fechaHoraInicio'] as Timestamp
               : null;
+
           final fin = data['fechaHoraFin'] is Timestamp
               ? data['fechaHoraFin'] as Timestamp
               : null;
+
+          final cerrado = _eventoCerrado(data);
 
           return ListView(
             padding: const EdgeInsets.all(16),
@@ -166,6 +181,7 @@ class _PanelEventoScreenState extends State<PanelEventoScreen> {
               ),
               const SizedBox(height: 8),
               Text('Lugar: $lugar'),
+              Text('Estado: $estado'),
               Text('Invitados permitidos: $totalInvitados'),
               Text('Usa anfitriones: ${usaAnfitriones ? "Sí" : "No"}'),
               if (usaAnfitriones)
@@ -177,24 +193,35 @@ class _PanelEventoScreenState extends State<PanelEventoScreen> {
                     ? 'Croquis de mesas: pendiente'
                     : 'Croquis de mesas: cargado',
               ),
+              if (cerrado)
+                const Padding(
+                  padding: EdgeInsets.only(top: 12),
+                  child: Text(
+                    'Este evento está cerrado. Solo permite consulta, reporte y archivo.',
+                    style: TextStyle(color: Colors.red),
+                  ),
+                ),
               const SizedBox(height: 24),
               ElevatedButton(
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => EditarEventoScreen(
-                        eventoId: widget.eventoId,
-                        empresaId: widget.empresaId,
-                      ),
-                    ),
-                  );
-                },
+                onPressed: cerrado
+                    ? null
+                    : () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => EditarEventoScreen(
+                              eventoId: widget.eventoId,
+                              empresaId: widget.empresaId,
+                            ),
+                          ),
+                        );
+                      },
                 child: const Text('Editar evento'),
               ),
               const SizedBox(height: 12),
               ElevatedButton(
-                onPressed: subiendoCroquis ? null : _subirCroquisMesas,
+                onPressed:
+                    cerrado || subiendoCroquis ? null : _subirCroquisMesas,
                 child: Text(
                   subiendoCroquis
                       ? 'Subiendo croquis...'
@@ -210,17 +237,19 @@ class _PanelEventoScreenState extends State<PanelEventoScreen> {
               const SizedBox(height: 12),
               if (usaAnfitriones)
                 ElevatedButton(
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => GestionarAnfitrionesScreen(
-                          eventoId: widget.eventoId,
-                          empresaId: widget.empresaId,
-                        ),
-                      ),
-                    );
-                  },
+                  onPressed: cerrado
+                      ? null
+                      : () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => GestionarAnfitrionesScreen(
+                                eventoId: widget.eventoId,
+                                empresaId: widget.empresaId,
+                              ),
+                            ),
+                          );
+                        },
                   child: const Text('Gestionar anfitriones'),
                 )
               else
@@ -230,30 +259,38 @@ class _PanelEventoScreenState extends State<PanelEventoScreen> {
                 ),
               const SizedBox(height: 12),
               ElevatedButton(
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => CrearInvitadoScreen(
-                        eventoId: widget.eventoId,
-                      ),
-                    ),
-                  );
-                },
+                onPressed: cerrado
+                    ? null
+                    : () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => CrearInvitadoScreen(
+                              eventoId: widget.eventoId,
+                              empresaId: widget.empresaId,
+                              nombreEvento: nombre,
+                              fechaHoraInicio: inicio,
+                              fechaHoraFin: fin,
+                            ),
+                          ),
+                        );
+                      },
                 child: const Text('Agregar invitado'),
               ),
               const SizedBox(height: 12),
               ElevatedButton(
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => CargaInvitadosTxtScreen(
-                        eventoId: widget.eventoId,
-                      ),
-                    ),
-                  );
-                },
+                onPressed: cerrado
+                    ? null
+                    : () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => CargaInvitadosTxtScreen(
+                              eventoId: widget.eventoId,
+                            ),
+                          ),
+                        );
+                      },
                 child: const Text('Carga masiva TXT'),
               ),
               const SizedBox(height: 12),
