@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../admin/home_screen.dart';
+import '../anfitrion/anfitrion_home_screen.dart';
 import '../capitan/cap_meseros_home_screen.dart';
 import '../hostess/hostess_home_screen.dart';
 import '../invitado/invitado_home_screen.dart';
@@ -39,10 +40,10 @@ class RoleRouterScreen extends StatelessWidget {
       'migratedAt': FieldValue.serverTimestamp(),
     };
 
-    await db
-        .collection('usuarios')
-        .doc(user.uid)
-        .set(userData, SetOptions(merge: true));
+    await db.collection('usuarios').doc(user.uid).set(
+          userData,
+          SetOptions(merge: true),
+        );
 
     return userData;
   }
@@ -143,24 +144,31 @@ class RoleRouterScreen extends StatelessWidget {
               email: email,
               empresaId: empresaId,
             );
+
           case 'hostess':
             return HostessHomeScreen(
               nombre: nombre,
               email: email,
               empresaId: empresaId,
             );
+
           case 'cap_meseros':
             return CapMeserosHomeScreen(
               nombre: nombre,
               email: email,
               empresaId: empresaId,
             );
+
           case 'invitado':
             return InvitadoHomeScreen(
               nombre: nombre,
               email: email,
               empresaId: empresaId,
             );
+
+          case 'anfitrion':
+            return const AnfitrionHomeScreen();
+
           default:
             return Scaffold(
               appBar: AppBar(title: const Text('Rol no válido')),

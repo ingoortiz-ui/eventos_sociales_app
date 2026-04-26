@@ -3,10 +3,12 @@ import 'package:flutter/material.dart';
 
 class EditarEventoScreen extends StatefulWidget {
   final String eventoId;
+  final String empresaId;
 
   const EditarEventoScreen({
     super.key,
     required this.eventoId,
+    required this.empresaId,
   });
 
   @override
@@ -17,19 +19,45 @@ class _EditarEventoScreenState extends State<EditarEventoScreen> {
   final nombreEventoController = TextEditingController();
   final lugarController = TextEditingController();
   final totalInvitadosController = TextEditingController();
+  final cantidadAnfitrionesController = TextEditingController();
+  final diasGaleriaController = TextEditingController(text: '30');
 
-  String tipoEvento = 'boda';
+  String? tipoEvento;
+  String modoEncuestaExperiencia = 'todos';
+
+  bool usaAnfitriones = false;
+  bool loading = true;
+  bool saving = false;
+
   DateTime? fechaInicio;
   TimeOfDay? horaInicio;
   DateTime? fechaFin;
   TimeOfDay? horaFin;
 
-  bool loading = true;
-  bool saving = false;
-
   DateTime? _combine(DateTime? date, TimeOfDay? time) {
     if (date == null || time == null) return null;
     return DateTime(date.year, date.month, date.day, time.hour, time.minute);
+  }
+
+  Future<int> _contarAnfitrionesActuales() async {
+    final snap = await FirebaseFirestore.instance
+        .collection('anfitriones_evento')
+        .where('empresaId', isEqualTo: widget.empresaId)
+        .where('eventoId', isEqualTo: widget.eventoId)
+        .get();
+
+    return snap.docs.length;
+  }
+
+  Future<int> _contarInvitadosRealesActuales() async {
+    final snap = await FirebaseFirestore.instance
+        .collection('eventos')
+        .doc(widget.eventoId)
+        .collection('invitados')
+        .where('esAnfitrion', isEqualTo: false)
+        .get();
+
+    return snap.docs.length;
   }
 
   Future<void> cargarEvento() async {
@@ -49,7 +77,22 @@ class _EditarEventoScreenState extends State<EditarEventoScreen> {
     nombreEventoController.text = (data['nombreEvento'] ?? '').toString();
     lugarController.text = (data['lugar'] ?? '').toString();
     totalInvitadosController.text = (data['totalInvitados'] ?? '').toString();
-    tipoEvento = (data['tipoEvento'] ?? 'boda').toString();
+    cantidadAnfitrionesController.text =
+        (data['cantidadAnfitriones'] ?? 0).toString();
+
+    tipoEvento = (data['tipoEvento'] ?? '').toString().isEmpty
+        ? null
+        : (data['tipoEvento'] ?? '').toString();
+
+    usaAnfitriones = data['usaAnfitriones'] == true;
+    modoEncuestaExperiencia =
+        (data['modoEncuestaExperiencia'] ?? 'todos').toString();
+
+    final expiracion = data['fechaExpiracionGaleria'];
+    if (expiracion is Timestamp && fin != null) {
+      final dias = expiracion.toDate().difference(fin).inDays;
+      diasGaleriaController.text = dias > 0 ? dias.toString() : '30';
+    }
 
     if (inicio != null) {
       fechaInicio = DateTime(inicio.year, inicio.month, inicio.day);
@@ -68,9 +111,10 @@ class _EditarEventoScreenState extends State<EditarEventoScreen> {
     final picked = await showDatePicker(
       context: context,
       initialDate: fechaInicio ?? DateTime.now(),
-      firstDate: DateTime(2025),
+      firstDate: DateTime.now().subtract(const Duration(days: 1)),
       lastDate: DateTime(2035),
     );
+
     if (picked != null) {
       setState(() => fechaInicio = picked);
     }
@@ -81,6 +125,7 @@ class _EditarEventoScreenState extends State<EditarEventoScreen> {
       context: context,
       initialTime: horaInicio ?? TimeOfDay.now(),
     );
+
     if (picked != null) {
       setState(() => horaInicio = picked);
     }
@@ -90,9 +135,11 @@ class _EditarEventoScreenState extends State<EditarEventoScreen> {
     final picked = await showDatePicker(
       context: context,
       initialDate: fechaFin ?? (fechaInicio ?? DateTime.now()),
-      firstDate: DateTime(2025),
+      firstDate:
+          fechaInicio ?? DateTime.now().subtract(const Duration(days: 1)),
       lastDate: DateTime(2035),
     );
+
     if (picked != null) {
       setState(() => fechaFin = picked);
     }
@@ -103,6 +150,7 @@ class _EditarEventoScreenState extends State<EditarEventoScreen> {
       context: context,
       initialTime: horaFin ?? TimeOfDay.now(),
     );
+
     if (picked != null) {
       setState(() => horaFin = picked);
     }
@@ -113,16 +161,76 @@ class _EditarEventoScreenState extends State<EditarEventoScreen> {
     final lugar = lugarController.text.trim();
     final totalInvitados =
         int.tryParse(totalInvitadosController.text.trim()) ?? 0;
+    final cantidadAnfitriones =
+        int.tryParse(cantidadAnfitrionesController.text.trim()) ?? 0;
+    final diasGaleria = int.tryParse(diasGaleriaController.text.trim()) ?? 30;
+
     final inicio = _combine(fechaInicio, horaInicio);
     final fin = _combine(fechaFin, horaFin);
 
     if (nombreEvento.isEmpty ||
         lugar.isEmpty ||
+        tipoEvento == null ||
         totalInvitados <= 0 ||
         inicio == null ||
         fin == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Completa todos los campos')),
+        const SnackBar(content: Text('Completa todos los campos obligatorios')),
+      );
+      return;
+    }
+
+    if (!fin.isAfter(inicio)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('La fecha/hora de fin debe ser mayor que la de inicio'),
+        ),
+      );
+      return;
+    }
+
+    if (usaAnfitriones && cantidadAnfitriones <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Captura la cantidad máxima de anfitriones'),
+        ),
+      );
+      return;
+    }
+
+    final anfitrionesActuales = await _contarAnfitrionesActuales();
+
+    if (!usaAnfitriones && anfitrionesActuales > 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Este evento ya tiene $anfitrionesActuales anfitrión(es). No puedes desactivar anfitriones.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    if (usaAnfitriones && anfitrionesActuales > cantidadAnfitriones) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Ya tienes $anfitrionesActuales anfitrión(es). No puedes bajar el máximo a $cantidadAnfitriones.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    final invitadosRealesActuales = await _contarInvitadosRealesActuales();
+
+    if (invitadosRealesActuales > totalInvitados) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Ya tienes $invitadosRealesActuales invitados reales. No puedes bajar el total a $totalInvitados.',
+          ),
+        ),
       );
       return;
     }
@@ -130,6 +238,8 @@ class _EditarEventoScreenState extends State<EditarEventoScreen> {
     setState(() => saving = true);
 
     try {
+      final fechaExpiracionGaleria = fin.add(Duration(days: diasGaleria));
+
       await FirebaseFirestore.instance
           .collection('eventos')
           .doc(widget.eventoId)
@@ -138,18 +248,25 @@ class _EditarEventoScreenState extends State<EditarEventoScreen> {
         'tipoEvento': tipoEvento,
         'lugar': lugar,
         'totalInvitados': totalInvitados,
+        'usaAnfitriones': usaAnfitriones,
+        'cantidadAnfitriones': usaAnfitriones ? cantidadAnfitriones : 0,
+        'modoEncuestaExperiencia': modoEncuestaExperiencia,
         'fechaHoraInicio': Timestamp.fromDate(inicio),
         'fechaHoraFin': Timestamp.fromDate(fin),
+        'fechaExpiracionGaleria': Timestamp.fromDate(fechaExpiracionGaleria),
         'updatedAt': FieldValue.serverTimestamp(),
       });
 
       if (!mounted) return;
+
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Evento actualizado')),
+        const SnackBar(content: Text('Evento actualizado correctamente')),
       );
+
       Navigator.pop(context);
     } catch (e) {
       if (!mounted) return;
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error actualizando evento: $e')),
       );
@@ -169,6 +286,8 @@ class _EditarEventoScreenState extends State<EditarEventoScreen> {
     nombreEventoController.dispose();
     lugarController.dispose();
     totalInvitadosController.dispose();
+    cantidadAnfitrionesController.dispose();
+    diasGaleriaController.dispose();
     super.dispose();
   }
 
@@ -180,7 +299,8 @@ class _EditarEventoScreenState extends State<EditarEventoScreen> {
       'bautizo',
       'graduacion',
       'aniversario',
-      'otro'
+      'corporativo',
+      'otro',
     ];
 
     if (loading) {
@@ -204,13 +324,14 @@ class _EditarEventoScreenState extends State<EditarEventoScreen> {
             const SizedBox(height: 12),
             DropdownButtonFormField<String>(
               value: tipoEvento,
+              decoration: const InputDecoration(labelText: 'Tipo de evento'),
+              hint: const Text('Selecciona tipo de evento'),
               items: tipos
                   .map((t) => DropdownMenuItem(value: t, child: Text(t)))
                   .toList(),
               onChanged: (value) {
-                if (value != null) setState(() => tipoEvento = value);
+                setState(() => tipoEvento = value);
               },
-              decoration: const InputDecoration(labelText: 'Tipo de evento'),
             ),
             const SizedBox(height: 12),
             TextField(
@@ -222,7 +343,66 @@ class _EditarEventoScreenState extends State<EditarEventoScreen> {
               controller: totalInvitadosController,
               keyboardType: TextInputType.number,
               decoration: const InputDecoration(
-                  labelText: 'Cantidad total de invitados'),
+                labelText: 'Cantidad total de invitados',
+                helperText: 'No incluye anfitriones',
+              ),
+            ),
+            const SizedBox(height: 16),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Permitir gestión de anfitriones'),
+              subtitle: const Text(
+                'Los anfitriones son extra al total de invitados',
+              ),
+              value: usaAnfitriones,
+              onChanged: (value) {
+                setState(() {
+                  usaAnfitriones = value;
+                  if (!value) {
+                    cantidadAnfitrionesController.text = '0';
+                  }
+                });
+              },
+            ),
+            if (usaAnfitriones) ...[
+              const SizedBox(height: 8),
+              TextField(
+                controller: cantidadAnfitrionesController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Cantidad máxima de anfitriones',
+                ),
+              ),
+            ],
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              value: modoEncuestaExperiencia,
+              decoration: const InputDecoration(
+                labelText: 'Quién puede responder encuesta',
+              ),
+              items: const [
+                DropdownMenuItem(
+                  value: 'todos',
+                  child: Text('Todos los invitados'),
+                ),
+                DropdownMenuItem(
+                  value: 'solo_anfitriones',
+                  child: Text('Solo anfitriones'),
+                ),
+              ],
+              onChanged: (value) {
+                if (value != null) {
+                  setState(() => modoEncuestaExperiencia = value);
+                }
+              },
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: diasGaleriaController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Días de vigencia de la galería',
+              ),
             ),
             const SizedBox(height: 20),
             ElevatedButton(

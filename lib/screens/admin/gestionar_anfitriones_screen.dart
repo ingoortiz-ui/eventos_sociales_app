@@ -1,5 +1,11 @@
+import 'dart:ui' as ui;
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:qr_flutter/qr_flutter.dart';
+import 'package:share_plus/share_plus.dart';
+
+import 'lista_invitados_screen.dart';
 
 class GestionarAnfitrionesScreen extends StatefulWidget {
   final String eventoId;
@@ -22,8 +28,13 @@ class _GestionarAnfitrionesScreenState
   final emailController = TextEditingController();
   final maxInvitadosController = TextEditingController(text: '10');
 
-  bool saving = false;
-  int totalInvitadosEvento = 0;
+  bool loadingEvento = true;
+  bool guardando = false;
+
+  String nombreEvento = '';
+  int totalInvitados = 0;
+  bool usaAnfitriones = false;
+  int cantidadAnfitriones = 0;
 
   String _normalizarCorreo(String correo) {
     return correo.trim().toLowerCase();
@@ -38,17 +49,96 @@ class _GestionarAnfitrionesScreenState
     final data = doc.data() ?? {};
 
     setState(() {
-      totalInvitadosEvento = (data['totalInvitados'] ?? 0) as int;
+      nombreEvento = (data['nombreEvento'] ?? '').toString();
+      totalInvitados = (data['totalInvitados'] ?? 0) as int;
+      usaAnfitriones = data['usaAnfitriones'] == true;
+      cantidadAnfitriones = (data['cantidadAnfitriones'] ?? 0) as int;
+      loadingEvento = false;
     });
   }
 
-  Future<Map<String, dynamic>?> _buscarUsuarioPorCorreo(String correo) async {
-    final correoNormalizado = _normalizarCorreo(correo);
+  Future<void> _compartirQrComoImagen({
+    required BuildContext context,
+    required String qr,
+    required String nombre,
+  }) async {
+    try {
+      if (qr.trim().isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Este anfitrión no tiene QR')),
+        );
+        return;
+      }
 
+      final painter = QrPainter(
+        data: qr,
+        version: QrVersions.auto,
+        gapless: true,
+        color: Colors.black,
+        emptyColor: Colors.white,
+      );
+
+      final byteData = await painter.toImageData(
+        900,
+        format: ui.ImageByteFormat.png,
+      );
+
+      if (byteData == null) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No se pudo generar imagen QR')),
+        );
+        return;
+      }
+
+      await Share.shareXFiles(
+        [
+          XFile.fromData(
+            byteData.buffer.asUint8List(),
+            mimeType: 'image/png',
+            name: 'qr_anfitrion_${nombre.replaceAll(' ', '_')}.png',
+          ),
+        ],
+        text: 'QR de acceso\nEvento: $nombreEvento\nAnfitrión: $nombre',
+        subject: 'QR de anfitrión - $nombreEvento',
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error compartiendo QR: $e')),
+      );
+    }
+  }
+
+  Future<int> _contarAnfitrionesActuales() async {
+    final snap = await FirebaseFirestore.instance
+        .collection('anfitriones_evento')
+        .where('empresaId', isEqualTo: widget.empresaId)
+        .where('eventoId', isEqualTo: widget.eventoId)
+        .where('activo', isEqualTo: true)
+        .get();
+
+    return snap.docs.length;
+  }
+
+  Future<bool> _correoYaEsAnfitrion(String email) async {
+    final snap = await FirebaseFirestore.instance
+        .collection('anfitriones_evento')
+        .where('empresaId', isEqualTo: widget.empresaId)
+        .where('eventoId', isEqualTo: widget.eventoId)
+        .where('email', isEqualTo: email)
+        .limit(1)
+        .get();
+
+    return snap.docs.isNotEmpty;
+  }
+
+  Future<Map<String, dynamic>?> _buscarUsuarioPorCorreo(String email) async {
     final snap = await FirebaseFirestore.instance
         .collection('usuarios')
         .where('empresaId', isEqualTo: widget.empresaId)
-        .where('email', isEqualTo: correoNormalizado)
+        .where('email', isEqualTo: email)
         .limit(1)
         .get();
 
@@ -60,37 +150,16 @@ class _GestionarAnfitrionesScreenState
     };
   }
 
-  Future<bool> _anfitrionYaExisteEnEvento(String correo) async {
-    final correoNormalizado = _normalizarCorreo(correo);
-
-    final snap = await FirebaseFirestore.instance
-        .collection('anfitriones_evento')
-        .where('empresaId', isEqualTo: widget.empresaId)
-        .where('eventoId', isEqualTo: widget.eventoId)
-        .where('email', isEqualTo: correoNormalizado)
-        .limit(1)
-        .get();
-
-    return snap.docs.isNotEmpty;
-  }
-
-  Future<int> _sumarCuposActuales() async {
-    final snap = await FirebaseFirestore.instance
-        .collection('anfitriones_evento')
-        .where('empresaId', isEqualTo: widget.empresaId)
-        .where('eventoId', isEqualTo: widget.eventoId)
-        .get();
-
-    int suma = 0;
-    for (final doc in snap.docs) {
-      final data = doc.data();
-      final maxInvitados = (data['maxInvitados'] ?? 0) as int;
-      suma += maxInvitados;
+  Future<void> _guardarAnfitrion() async {
+    if (!usaAnfitriones) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Este evento no permite gestión de anfitriones'),
+        ),
+      );
+      return;
     }
-    return suma;
-  }
 
-  Future<void> guardarAnfitrion() async {
     final nombre = nombreController.text.trim();
     final email = _normalizarCorreo(emailController.text);
     final maxInvitados = int.tryParse(maxInvitadosController.text.trim()) ?? 0;
@@ -98,101 +167,158 @@ class _GestionarAnfitrionesScreenState
     if (nombre.isEmpty || email.isEmpty || maxInvitados <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Completa nombre, correo y máximo de invitados válido'),
+          content: Text('Completa nombre, correo y máximo de invitados'),
         ),
       );
       return;
     }
 
-    setState(() => saving = true);
+    setState(() => guardando = true);
 
     try {
-      final yaExisteEnEvento = await _anfitrionYaExisteEnEvento(email);
+      final anfitrionesActuales = await _contarAnfitrionesActuales();
 
-      if (yaExisteEnEvento) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-                'Ese correo ya está registrado como anfitrión en este evento'),
-          ),
-        );
-        setState(() => saving = false);
-        return;
-      }
-
-      final sumaActual = await _sumarCuposActuales();
-      final nuevaSuma = sumaActual + maxInvitados;
-
-      if (nuevaSuma > totalInvitadosEvento) {
+      if (anfitrionesActuales >= cantidadAnfitriones) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'No puedes asignar ese cupo. Total evento: $totalInvitadosEvento, ya asignado: $sumaActual, intento nuevo: $maxInvitados',
+              'Ya alcanzaste el máximo de anfitriones permitidos: $cantidadAnfitriones',
             ),
           ),
         );
-        setState(() => saving = false);
         return;
       }
 
-      final usuarioExistente = await _buscarUsuarioPorCorreo(email);
+      final yaExiste = await _correoYaEsAnfitrion(email);
+
+      if (yaExiste) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Ese correo ya está registrado como anfitrión'),
+          ),
+        );
+        return;
+      }
 
       String uidUsuario = '';
       bool existeEnSistema = false;
-      String nombreSistema = nombre;
+
+      final usuarioExistente = await _buscarUsuarioPorCorreo(email);
 
       if (usuarioExistente != null) {
-        final data = (usuarioExistente['data'] ?? {}) as Map<String, dynamic>;
         uidUsuario = (usuarioExistente['uid'] ?? '').toString();
         existeEnSistema = true;
-        nombreSistema = (data['nombre'] ?? nombre).toString();
+
+        await FirebaseFirestore.instance
+            .collection('usuarios')
+            .doc(uidUsuario)
+            .set({
+          'empresaId': widget.empresaId,
+          'nombre': nombre,
+          'email': email,
+          'rol': 'anfitrion',
+          'activo': true,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      } else {
+        final nuevoUsuarioRef =
+            FirebaseFirestore.instance.collection('usuarios').doc();
+
+        await nuevoUsuarioRef.set({
+          'empresaId': widget.empresaId,
+          'nombre': nombre,
+          'email': email,
+          'rol': 'anfitrion',
+          'activo': true,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+
+        uidUsuario = nuevoUsuarioRef.id;
       }
 
-      await FirebaseFirestore.instance.collection('anfitriones_evento').add({
+      final anfitrionRef =
+          FirebaseFirestore.instance.collection('anfitriones_evento').doc();
+
+      await anfitrionRef.set({
         'empresaId': widget.empresaId,
         'eventoId': widget.eventoId,
-        'nombre': nombreSistema,
+        'nombre': nombre,
         'email': email,
         'maxInvitados': maxInvitados,
-        'activo': true,
         'uidUsuario': uidUsuario,
+        'activo': true,
         'existeEnSistema': existeEnSistema,
         'createdAt': FieldValue.serverTimestamp(),
       });
+
+      final invitadosRef = FirebaseFirestore.instance
+          .collection('eventos')
+          .doc(widget.eventoId)
+          .collection('invitados');
+
+      final invitadoEspejoRef = invitadosRef.doc();
+
+      final qrPayload =
+          '{"eventoId":"${widget.eventoId}","invitadoId":"${invitadoEspejoRef.id}"}';
+
+      await invitadoEspejoRef.set({
+        'nombre_invitado': nombre,
+        'email_invitado': email,
+        'mesa': 'ANFITRION',
+        'usuarioId': uidUsuario,
+        'eventoId': widget.eventoId,
+        'empresaId': widget.empresaId,
+        'anfitrionId': anfitrionRef.id,
+        'anfitrionNombre': nombre,
+        'anfitrionUid': uidUsuario,
+        'estado_asistencia': 'pendiente',
+        'qr_code': qrPayload,
+        'existeEnSistema': existeEnSistema,
+        'creadoPorRol': 'admin',
+        'esAnfitrion': true,
+        'cuentaComoInvitado': false,
+        'puedeGestionarInvitados': true,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      await anfitrionRef.update({
+        'invitadoEspejoId': invitadoEspejoRef.id,
+        'qr_code': qrPayload,
+      });
+
+      if (!mounted) return;
 
       nombreController.clear();
       emailController.clear();
       maxInvitadosController.text = '10';
 
-      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            existeEnSistema
-                ? 'Anfitrión ligado a usuario existente'
-                : 'Anfitrión guardado. Aún no existe como usuario del sistema',
-          ),
-        ),
+        const SnackBar(content: Text('Anfitrión guardado correctamente')),
       );
     } catch (e) {
       if (!mounted) return;
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error guardando anfitrión: $e')),
       );
     } finally {
-      if (mounted) setState(() => saving = false);
+      if (mounted) setState(() => guardando = false);
     }
   }
 
-  Future<void> eliminarAnfitrion(String docId) async {
+  Future<void> _eliminarAnfitrion({
+    required String anfitrionId,
+    required String? invitadoEspejoId,
+  }) async {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('Eliminar anfitrión'),
         content: const Text(
-            '¿Seguro que deseas eliminar este anfitrión del evento?'),
+          '¿Seguro que deseas eliminar este anfitrión? También se eliminará su QR de acceso como anfitrión.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -208,15 +334,33 @@ class _GestionarAnfitrionesScreenState
 
     if (confirm != true) return;
 
-    await FirebaseFirestore.instance
-        .collection('anfitriones_evento')
-        .doc(docId)
-        .delete();
+    try {
+      await FirebaseFirestore.instance
+          .collection('anfitriones_evento')
+          .doc(anfitrionId)
+          .delete();
 
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Anfitrión eliminado')),
-    );
+      if (invitadoEspejoId != null && invitadoEspejoId.isNotEmpty) {
+        await FirebaseFirestore.instance
+            .collection('eventos')
+            .doc(widget.eventoId)
+            .collection('invitados')
+            .doc(invitadoEspejoId)
+            .delete();
+      }
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Anfitrión eliminado')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error eliminando anfitrión: $e')),
+      );
+    }
   }
 
   @override
@@ -235,108 +379,116 @@ class _GestionarAnfitrionesScreenState
 
   @override
   Widget build(BuildContext context) {
-    final ref = FirebaseFirestore.instance
+    if (loadingEvento) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    final anfitrionesStream = FirebaseFirestore.instance
         .collection('anfitriones_evento')
         .where('empresaId', isEqualTo: widget.empresaId)
-        .where('eventoId', isEqualTo: widget.eventoId);
+        .where('eventoId', isEqualTo: widget.eventoId)
+        .where('activo', isEqualTo: true)
+        .snapshots();
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Gestionar anfitriones'),
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                'Total invitados del evento: $totalInvitadosEvento',
-                style: const TextStyle(fontWeight: FontWeight.bold),
+      body: !usaAnfitriones
+          ? const Center(
+              child: Padding(
+                padding: EdgeInsets.all(16),
+                child: Text(
+                  'Este evento no permite gestión de anfitriones.',
+                  textAlign: TextAlign.center,
+                ),
               ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: nombreController,
-              decoration: const InputDecoration(
-                labelText: 'Nombre del anfitrión',
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: emailController,
-              keyboardType: TextInputType.emailAddress,
-              decoration: const InputDecoration(
-                labelText: 'Correo del anfitrión',
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: maxInvitadosController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'Máximo de invitados',
-              ),
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: saving ? null : guardarAnfitrion,
-              child: Text(saving ? 'Guardando...' : 'Agregar anfitrión'),
-            ),
-            const SizedBox(height: 16),
-            Expanded(
-              child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                stream: ref.snapshots(),
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState == ConnectionState.waiting) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
-
-                  if (snapshot.hasError) {
-                    return Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Text(
-                            'Error cargando anfitriones: ${snapshot.error}'),
+            )
+          : Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                children: [
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      nombreEvento.isEmpty ? 'Evento' : nombreEvento,
+                      style: const TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
                       ),
-                    );
-                  }
+                    ),
+                  ),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text('Invitados permitidos: $totalInvitados'),
+                  ),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Máximo de anfitriones permitidos: $cantidadAnfitriones',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: nombreController,
+                    decoration: const InputDecoration(
+                      labelText: 'Nombre del anfitrión',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: emailController,
+                    keyboardType: TextInputType.emailAddress,
+                    decoration: const InputDecoration(
+                      labelText: 'Correo del anfitrión',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: maxInvitadosController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Máximo de invitados que puede registrar',
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton(
+                    onPressed: guardando ? null : _guardarAnfitrion,
+                    child:
+                        Text(guardando ? 'Guardando...' : 'Agregar anfitrión'),
+                  ),
+                  const SizedBox(height: 16),
+                  Expanded(
+                    child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                      stream: anfitrionesStream,
+                      builder: (context, snapshot) {
+                        if (snapshot.connectionState ==
+                            ConnectionState.waiting) {
+                          return const Center(
+                            child: CircularProgressIndicator(),
+                          );
+                        }
 
-                  final docs = snapshot.data?.docs ?? [];
+                        if (snapshot.hasError) {
+                          return Center(
+                            child: Text(
+                              'Error cargando anfitriones: ${snapshot.error}',
+                            ),
+                          );
+                        }
 
-                  docs.sort((a, b) {
-                    final aTs = a.data()['createdAt'];
-                    final bTs = b.data()['createdAt'];
+                        final docs = snapshot.data?.docs ?? [];
 
-                    if (aTs is Timestamp && bTs is Timestamp) {
-                      return bTs.compareTo(aTs);
-                    }
-                    return 0;
-                  });
+                        if (docs.isEmpty) {
+                          return const Center(
+                            child: Text('Aún no hay anfitriones registrados'),
+                          );
+                        }
 
-                  int sumaActual = 0;
-                  for (final d in docs) {
-                    sumaActual += (d.data()['maxInvitados'] ?? 0) as int;
-                  }
-
-                  if (docs.isEmpty) {
-                    return const Center(
-                      child: Text('Aún no hay anfitriones registrados'),
-                    );
-                  }
-
-                  return Column(
-                    children: [
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          'Cupo asignado a anfitriones: $sumaActual / $totalInvitadosEvento',
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      Expanded(
-                        child: ListView.separated(
+                        return ListView.separated(
                           itemCount: docs.length,
                           separatorBuilder: (_, __) => const Divider(),
                           itemBuilder: (context, index) {
@@ -347,35 +499,66 @@ class _GestionarAnfitrionesScreenState
                             final email = (data['email'] ?? '').toString();
                             final maxInvitados =
                                 (data['maxInvitados'] ?? 0).toString();
-                            final existeEnSistema =
-                                data['existeEnSistema'] == true;
-                            final uidUsuario =
-                                (data['uidUsuario'] ?? '').toString();
+                            final invitadoEspejoId =
+                                (data['invitadoEspejoId'] ?? '').toString();
+                            final qr = (data['qr_code'] ?? '').toString();
 
                             return ListTile(
                               title: Text(nombre),
                               subtitle: Text(
-                                '$email\nMáximo invitados: $maxInvitados\n'
-                                '${existeEnSistema ? "Usuario existente en sistema" : "Aún no existe en sistema"}'
-                                '${uidUsuario.isNotEmpty ? "\nUID: $uidUsuario" : ""}',
+                                '$email\nPuede registrar invitados: $maxInvitados\nQR propio generado',
                               ),
                               isThreeLine: true,
-                              trailing: IconButton(
-                                icon: const Icon(Icons.delete_outline),
-                                onPressed: () => eliminarAnfitrion(doc.id),
+                              trailing: PopupMenuButton<String>(
+                                onSelected: (value) {
+                                  if (value == 'invitados') {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => ListaInvitadosScreen(
+                                          eventoId: widget.eventoId,
+                                          anfitrionIdFiltro: doc.id,
+                                          titulo: 'Invitados de $nombre',
+                                        ),
+                                      ),
+                                    );
+                                  } else if (value == 'compartir') {
+                                    _compartirQrComoImagen(
+                                      context: context,
+                                      qr: qr,
+                                      nombre: nombre,
+                                    );
+                                  } else if (value == 'eliminar') {
+                                    _eliminarAnfitrion(
+                                      anfitrionId: doc.id,
+                                      invitadoEspejoId: invitadoEspejoId,
+                                    );
+                                  }
+                                },
+                                itemBuilder: (_) => const [
+                                  PopupMenuItem(
+                                    value: 'invitados',
+                                    child: Text('Gestionar invitados'),
+                                  ),
+                                  PopupMenuItem(
+                                    value: 'compartir',
+                                    child: Text('Compartir QR imagen'),
+                                  ),
+                                  PopupMenuItem(
+                                    value: 'eliminar',
+                                    child: Text('Eliminar anfitrión'),
+                                  ),
+                                ],
                               ),
                             );
                           },
-                        ),
-                      ),
-                    ],
-                  );
-                },
+                        );
+                      },
+                    ),
+                  ),
+                ],
               ),
             ),
-          ],
-        ),
-      ),
     );
   }
 }

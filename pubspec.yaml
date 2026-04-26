@@ -21,6 +21,7 @@ dependencies:
 
   # Multimedia
   image_picker: ^1.1.2
+  file_picker: ^8.0.7
   
   # QR y escáner
   qr_flutter: ^4.1.0

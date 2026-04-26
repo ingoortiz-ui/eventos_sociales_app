@@ -1,6 +1,8 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 class CargaInvitadosTxtScreen extends StatefulWidget {
@@ -17,404 +19,512 @@ class CargaInvitadosTxtScreen extends StatefulWidget {
 }
 
 class _CargaInvitadosTxtScreenState extends State<CargaInvitadosTxtScreen> {
-  final textoController = TextEditingController();
+  final textoPegadoController = TextEditingController();
 
-  bool parsing = false;
-  bool importing = false;
-  String status = 'Pega aquí el contenido del TXT';
+  bool loadingEvento = true;
+  bool processing = false;
 
-  List<Map<String, String>> validos = [];
-  List<String> invalidos = [];
-  List<String> duplicadosInternos = [];
-  List<String> duplicadosEvento = [];
+  String empresaId = '';
+  String nombreEvento = '';
+  int totalInvitados = 0;
+  bool usaAnfitriones = false;
 
-  String _normalizar(String value) => value.trim().toLowerCase();
+  String? anfitrionSeleccionadoId;
+  String anfitrionSeleccionadoNombre = '';
+  String anfitrionUid = '';
+  int anfitrionMaxInvitados = 0;
 
-  String _claveNombreMesa(String nombre, String mesa) {
-    return '${_normalizar(nombre)}|${_normalizar(mesa)}';
+  String nombreArchivo = '';
+  String contenidoTxt = '';
+
+  int procesados = 0;
+  int guardados = 0;
+  int omitidos = 0;
+  final List<String> detalles = [];
+
+  String _normalizarCorreo(String correo) {
+    return correo.trim().toLowerCase();
   }
 
-  Future<void> procesarTexto() async {
-    final content = textoController.text.trim();
+  Future<void> _cargarEvento() async {
+    final doc = await FirebaseFirestore.instance
+        .collection('eventos')
+        .doc(widget.eventoId)
+        .get();
 
-    if (content.isEmpty) {
-      setState(() {
-        validos = [];
-        invalidos = [];
-        duplicadosInternos = [];
-        duplicadosEvento = [];
-        status = 'No hay contenido para procesar';
-      });
-      return;
-    }
+    final data = doc.data() ?? {};
 
     setState(() {
-      parsing = true;
-      status = 'Procesando texto...';
-      validos = [];
-      invalidos = [];
-      duplicadosInternos = [];
-      duplicadosEvento = [];
+      empresaId = (data['empresaId'] ?? '').toString();
+      nombreEvento = (data['nombreEvento'] ?? '').toString();
+      totalInvitados = (data['totalInvitados'] ?? 0) as int;
+      usaAnfitriones = data['usaAnfitriones'] == true;
+      loadingEvento = false;
     });
+  }
 
+  Future<int> _contarInvitadosReales() async {
+    final snap = await FirebaseFirestore.instance
+        .collection('eventos')
+        .doc(widget.eventoId)
+        .collection('invitados')
+        .where('esAnfitrion', isEqualTo: false)
+        .get();
+
+    return snap.docs.length;
+  }
+
+  Future<int> _contarInvitadosDelAnfitrion(String anfitrionId) async {
+    final snap = await FirebaseFirestore.instance
+        .collection('eventos')
+        .doc(widget.eventoId)
+        .collection('invitados')
+        .where('anfitrionId', isEqualTo: anfitrionId)
+        .where('esAnfitrion', isEqualTo: false)
+        .get();
+
+    return snap.docs.length;
+  }
+
+  Future<Set<String>> _emailsExistentesEnEvento() async {
+    final snap = await FirebaseFirestore.instance
+        .collection('eventos')
+        .doc(widget.eventoId)
+        .collection('invitados')
+        .get();
+
+    return snap.docs
+        .map((d) => _normalizarCorreo(
+              (d.data()['email_invitado'] ?? '').toString(),
+            ))
+        .where((email) => email.isNotEmpty)
+        .toSet();
+  }
+
+  Future<Map<String, dynamic>?> _buscarUsuarioPorCorreo(String email) async {
+    final snap = await FirebaseFirestore.instance
+        .collection('usuarios')
+        .where('empresaId', isEqualTo: empresaId)
+        .where('email', isEqualTo: email)
+        .limit(1)
+        .get();
+
+    if (snap.docs.isEmpty) return null;
+
+    return {
+      'uid': snap.docs.first.id,
+      'data': snap.docs.first.data(),
+    };
+  }
+
+  Future<void> _seleccionarArchivoTxt() async {
     try {
-      final invitadosExistentesSnap = await FirebaseFirestore.instance
-          .collection('eventos')
-          .doc(widget.eventoId)
-          .collection('invitados')
-          .get();
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['txt'],
+        withData: true,
+      );
 
-      final correosEvento = <String>{};
-      final clavesNombreMesaEvento = <String>{};
+      if (result == null || result.files.isEmpty) return;
 
-      for (final doc in invitadosExistentesSnap.docs) {
-        final data = doc.data();
-        final email = _normalizar((data['email_invitado'] ?? '').toString());
-        final nombre = (data['nombre_invitado'] ?? '').toString();
-        final mesa = (data['mesa'] ?? '').toString();
+      final file = result.files.first;
+      Uint8List? bytes = file.bytes;
 
-        if (email.isNotEmpty) {
-          correosEvento.add(email);
-        }
-
-        if (nombre.isNotEmpty && mesa.isNotEmpty) {
-          clavesNombreMesaEvento.add(_claveNombreMesa(nombre, mesa));
-        }
-      }
-
-      final lines = content
-          .split(RegExp(r'\r?\n'))
-          .map((e) => e.trim())
-          .where((e) => e.isNotEmpty)
-          .toList();
-
-      if (lines.isEmpty) {
-        setState(() {
-          parsing = false;
-          status = 'El texto está vacío';
-        });
+      if (bytes == null) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No se pudo leer el archivo TXT')),
+        );
         return;
       }
 
-      final firstLine = lines.first.toLowerCase();
-      final dataLines = <String>[];
-
-      if (firstLine.contains('nombre') &&
-          firstLine.contains('correo') &&
-          firstLine.contains('mesa')) {
-        dataLines.addAll(lines.skip(1));
-      } else {
-        dataLines.addAll(lines);
-      }
-
-      final nuevosValidos = <Map<String, String>>[];
-      final nuevosInvalidos = <String>[];
-      final nuevosDuplicadosInternos = <String>[];
-      final nuevosDuplicadosEvento = <String>[];
-
-      final correosArchivo = <String>{};
-      final clavesNombreMesaArchivo = <String>{};
-
-      for (int i = 0; i < dataLines.length; i++) {
-        final line = dataLines[i];
-        final lineaVisible = i + 1;
-        final parts = line.split('|').map((e) => e.trim()).toList();
-
-        if (parts.length < 3) {
-          nuevosInvalidos.add('Línea $lineaVisible: formato inválido');
-          continue;
-        }
-
-        final nombre = parts[0];
-        final email = _normalizar(parts[1]);
-        final mesa = parts[2];
-        final invitadoDe = parts.length >= 4 ? parts[3] : '';
-
-        if (nombre.isEmpty || email.isEmpty || mesa.isEmpty) {
-          nuevosInvalidos.add(
-            'Línea $lineaVisible: faltan nombre, correo o mesa',
-          );
-          continue;
-        }
-
-        final claveCorreo = email;
-        final claveNombreMesa = _claveNombreMesa(nombre, mesa);
-
-        final duplicadoInternoCorreo = correosArchivo.contains(claveCorreo);
-        final duplicadoInternoNombreMesa =
-            clavesNombreMesaArchivo.contains(claveNombreMesa);
-
-        if (duplicadoInternoCorreo || duplicadoInternoNombreMesa) {
-          nuevosDuplicadosInternos.add(
-            'Línea $lineaVisible: $nombre | $email | mesa $mesa',
-          );
-          continue;
-        }
-
-        final duplicadoEventoCorreo = correosEvento.contains(claveCorreo);
-        final duplicadoEventoNombreMesa =
-            clavesNombreMesaEvento.contains(claveNombreMesa);
-
-        if (duplicadoEventoCorreo || duplicadoEventoNombreMesa) {
-          nuevosDuplicadosEvento.add(
-            'Línea $lineaVisible: $nombre | $email | mesa $mesa',
-          );
-          continue;
-        }
-
-        correosArchivo.add(claveCorreo);
-        clavesNombreMesaArchivo.add(claveNombreMesa);
-
-        nuevosValidos.add({
-          'nombre_invitado': nombre,
-          'email_invitado': email,
-          'mesa': mesa,
-          'invitadoDe': invitadoDe,
-        });
-      }
+      final texto = utf8.decode(bytes, allowMalformed: true);
 
       setState(() {
-        validos = nuevosValidos;
-        invalidos = nuevosInvalidos;
-        duplicadosInternos = nuevosDuplicadosInternos;
-        duplicadosEvento = nuevosDuplicadosEvento;
-        parsing = false;
-        status = 'Validación completa: ${nuevosValidos.length} válido(s), '
-            '${nuevosInvalidos.length} inválido(s), '
-            '${nuevosDuplicadosInternos.length} duplicado(s) internos, '
-            '${nuevosDuplicadosEvento.length} duplicado(s) en evento';
+        nombreArchivo = file.name;
+        contenidoTxt = texto;
+        textoPegadoController.text = texto;
+        procesados = 0;
+        guardados = 0;
+        omitidos = 0;
+        detalles.clear();
       });
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Archivo cargado: ${file.name}')),
+      );
     } catch (e) {
-      setState(() {
-        parsing = false;
-        validos = [];
-        invalidos = [];
-        duplicadosInternos = [];
-        duplicadosEvento = [];
-        status = 'Error procesando texto: $e';
-      });
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error seleccionando archivo: $e')),
+      );
     }
   }
 
-  Future<void> importarValidos() async {
-    if (validos.isEmpty) {
+  List<Map<String, String>> _parsearLineas(String texto) {
+    final lineas = const LineSplitter().convert(texto);
+    final resultado = <Map<String, String>>[];
+
+    for (final lineaOriginal in lineas) {
+      final linea = lineaOriginal.trim();
+      if (linea.isEmpty) continue;
+
+      String separador = ',';
+      if (linea.contains(';')) {
+        separador = ';';
+      } else if (linea.contains('|')) {
+        separador = '|';
+      }
+
+      final partes = linea.split(separador).map((e) => e.trim()).toList();
+
+      if (partes.length < 2) {
+        resultado.add({
+          'error': 'Formato inválido',
+          'linea': linea,
+        });
+        continue;
+      }
+
+      resultado.add({
+        'nombre': partes[0],
+        'email': _normalizarCorreo(partes[1]),
+        'mesa': partes.length >= 3 ? partes[2] : '',
+        'linea': linea,
+      });
+    }
+
+    return resultado;
+  }
+
+  Future<void> _procesarCargaMasiva() async {
+    final fuenteTexto = textoPegadoController.text.trim().isNotEmpty
+        ? textoPegadoController.text
+        : contenidoTxt;
+
+    if (fuenteTexto.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No hay invitados válidos para importar')),
+        const SnackBar(
+          content: Text('Selecciona un TXT o pega el contenido'),
+        ),
       );
       return;
     }
 
     setState(() {
-      importing = true;
-      status = 'Importando invitados válidos...';
+      processing = true;
+      procesados = 0;
+      guardados = 0;
+      omitidos = 0;
+      detalles.clear();
     });
 
     try {
+      final lineas = _parsearLineas(fuenteTexto);
+      final emailsExistentes = await _emailsExistentesEnEvento();
+      final emailsEnArchivo = <String>{};
+
+      int totalActualEvento = await _contarInvitadosReales();
+
+      int totalActualAnfitrion = 0;
+      if (usaAnfitriones && (anfitrionSeleccionadoId ?? '').isNotEmpty) {
+        totalActualAnfitrion =
+            await _contarInvitadosDelAnfitrion(anfitrionSeleccionadoId!);
+      }
+
       final invitadosRef = FirebaseFirestore.instance
           .collection('eventos')
           .doc(widget.eventoId)
           .collection('invitados');
 
-      final batch = FirebaseFirestore.instance.batch();
+      for (final item in lineas) {
+        procesados++;
 
-      for (final invitado in validos) {
-        final docRef = invitadosRef.doc();
+        if (item.containsKey('error')) {
+          omitidos++;
+          detalles.add('Línea inválida: ${item['linea']}');
+          continue;
+        }
 
-        final qrPayload = jsonEncode({
+        final nombre = (item['nombre'] ?? '').trim();
+        final email = _normalizarCorreo(item['email'] ?? '');
+        final mesa = (item['mesa'] ?? '').trim();
+        final linea = item['linea'] ?? '';
+
+        if (nombre.isEmpty || email.isEmpty) {
+          omitidos++;
+          detalles.add('Faltan datos obligatorios: $linea');
+          continue;
+        }
+
+        if (emailsEnArchivo.contains(email)) {
+          omitidos++;
+          detalles.add('Correo repetido dentro del archivo/texto: $email');
+          continue;
+        }
+
+        if (emailsExistentes.contains(email)) {
+          omitidos++;
+          detalles.add('Correo ya registrado en este evento: $email');
+          continue;
+        }
+
+        if (totalActualEvento >= totalInvitados) {
+          omitidos++;
+          detalles.add(
+            'Se alcanzó el límite total de invitados reales. No se registró: $email',
+          );
+          continue;
+        }
+
+        if (usaAnfitriones &&
+            (anfitrionSeleccionadoId ?? '').isNotEmpty &&
+            totalActualAnfitrion >= anfitrionMaxInvitados) {
+          omitidos++;
+          detalles.add(
+            'El anfitrión $anfitrionSeleccionadoNombre ya alcanzó su límite. No se registró: $email',
+          );
+          continue;
+        }
+
+        final usuarioExistente = await _buscarUsuarioPorCorreo(email);
+
+        String uidUsuario = '';
+        bool existeEnSistema = false;
+
+        if (usuarioExistente != null) {
+          uidUsuario = (usuarioExistente['uid'] ?? '').toString();
+          existeEnSistema = true;
+        } else {
+          final nuevoUsuarioRef =
+              FirebaseFirestore.instance.collection('usuarios').doc();
+
+          await nuevoUsuarioRef.set({
+            'empresaId': empresaId,
+            'nombre': nombre,
+            'email': email,
+            'rol': 'invitado',
+            'activo': true,
+            'createdAt': FieldValue.serverTimestamp(),
+          });
+
+          uidUsuario = nuevoUsuarioRef.id;
+          existeEnSistema = false;
+        }
+
+        final invitadoRef = invitadosRef.doc();
+
+        final qrPayload =
+            '{"eventoId":"${widget.eventoId}","invitadoId":"${invitadoRef.id}"}';
+
+        await invitadoRef.set({
+          'nombre_invitado': nombre,
+          'email_invitado': email,
+          'mesa': mesa,
+          'usuarioId': uidUsuario,
           'eventoId': widget.eventoId,
-          'invitadoId': docRef.id,
-        });
-
-        batch.set(docRef, {
-          'nombre_invitado': invitado['nombre_invitado'],
-          'email_invitado': invitado['email_invitado'],
-          'mesa': invitado['mesa'],
-          'invitadoDe': invitado['invitadoDe'] ?? '',
+          'empresaId': empresaId,
+          'anfitrionId': usaAnfitriones ? (anfitrionSeleccionadoId ?? '') : '',
+          'anfitrionNombre': usaAnfitriones ? anfitrionSeleccionadoNombre : '',
+          'anfitrionUid': usaAnfitriones ? anfitrionUid : '',
           'estado_asistencia': 'pendiente',
           'qr_code': qrPayload,
+          'existeEnSistema': existeEnSistema,
+          'creadoPorRol': 'admin_txt',
+          'esAnfitrion': false,
+          'cuentaComoInvitado': true,
+          'puedeGestionarInvitados': false,
           'createdAt': FieldValue.serverTimestamp(),
         });
+
+        emailsExistentes.add(email);
+        emailsEnArchivo.add(email);
+        totalActualEvento++;
+
+        if (usaAnfitriones && (anfitrionSeleccionadoId ?? '').isNotEmpty) {
+          totalActualAnfitrion++;
+        }
+
+        guardados++;
+        detalles.add('Guardado: $email');
       }
-
-      final totalImportados = validos.length;
-
-      await batch.commit();
-
-      setState(() {
-        importing = false;
-        status = 'Importación completada: $totalImportados invitado(s)';
-        textoController.clear();
-        validos = [];
-        invalidos = [];
-        duplicadosInternos = [];
-        duplicadosEvento = [];
-      });
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Se importaron $totalImportados invitado(s) válidos con QR automático',
+            'Carga terminada. Procesados: $procesados, guardados: $guardados, omitidos: $omitidos',
           ),
         ),
       );
     } catch (e) {
-      setState(() {
-        importing = false;
-        status = 'Error importando invitados: $e';
-      });
-
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error importando invitados: $e')),
+        SnackBar(content: Text('Error procesando carga masiva: $e')),
       );
+    } finally {
+      if (mounted) {
+        setState(() => processing = false);
+      }
     }
   }
 
-  Widget _bloqueLista(
-    String titulo,
-    List<String> items, {
-    Color? colorTitulo,
-  }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          '$titulo (${items.length})',
-          style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-            color: colorTitulo,
-          ),
-        ),
-        const SizedBox(height: 8),
-        if (items.isEmpty)
-          const Text('Sin elementos')
-        else
-          ...items.take(10).map(
-                (e) => Padding(
-                  padding: const EdgeInsets.only(bottom: 6),
-                  child: Text(e),
-                ),
-              ),
-        if (items.length > 10) Text('... y ${items.length - 10} más'),
-      ],
-    );
-  }
-
-  Widget _bloqueValidos() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Válidos (${validos.length})',
-          style: const TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-            color: Colors.green,
-          ),
-        ),
-        const SizedBox(height: 8),
-        if (validos.isEmpty)
-          const Text('Sin elementos')
-        else
-          ...validos.take(10).map(
-                (inv) => ListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(inv['nombre_invitado'] ?? ''),
-                  subtitle: Text(
-                    '${inv['email_invitado'] ?? ''} • Mesa ${inv['mesa'] ?? ''}',
-                  ),
-                  trailing: Text(inv['invitadoDe'] ?? ''),
-                ),
-              ),
-        if (validos.length > 10) Text('... y ${validos.length - 10} más'),
-      ],
-    );
+  @override
+  void initState() {
+    super.initState();
+    _cargarEvento();
   }
 
   @override
   void dispose() {
-    textoController.dispose();
+    textoPegadoController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final totalProcesados = validos.length +
-        invalidos.length +
-        duplicadosInternos.length +
-        duplicadosEvento.length;
+    if (loadingEvento) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    final anfitrionesStream = FirebaseFirestore.instance
+        .collection('anfitriones_evento')
+        .where('empresaId', isEqualTo: empresaId)
+        .where('eventoId', isEqualTo: widget.eventoId)
+        .where('activo', isEqualTo: true)
+        .snapshots();
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Carga masiva por TXT'),
+        title: const Text('Carga masiva TXT'),
       ),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: ListView(
           children: [
-            SelectableText('Evento ID: ${widget.eventoId}'),
-            const SizedBox(height: 16),
-            const Text(
-              'Formato esperado:',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            const SelectableText(
-              'Nombre Invitado|Correo Invitado|Numero Mesa|Invitado De\n'
-              'Juan Pérez|juan@evento.com|4|Ana\n'
-              'María López|maria@evento.com|4|Ana\n'
-              'Carlos Ruiz|carlos@evento.com|7|',
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: textoController,
-              minLines: 8,
-              maxLines: 14,
-              decoration: const InputDecoration(
-                border: OutlineInputBorder(),
-                hintText: 'Pega aquí el contenido del TXT',
+            Text(
+              nombreEvento.isEmpty ? 'Evento' : nombreEvento,
+              style: const TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
+            Text('Total invitados permitidos: $totalInvitados'),
+            if (usaAnfitriones)
+              const Text('Este evento permite asignar anfitrión.')
+            else
+              const Text('Este evento no usa anfitriones.'),
+            const SizedBox(height: 16),
+            if (usaAnfitriones)
+              StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                stream: anfitrionesStream,
+                builder: (context, snapshot) {
+                  final docs = snapshot.data?.docs ?? [];
+
+                  if (docs.isEmpty) {
+                    return const Text(
+                      'Aún no hay anfitriones. Los invitados se guardarán sin anfitrión.',
+                    );
+                  }
+
+                  return DropdownButtonFormField<String>(
+                    value: anfitrionSeleccionadoId ?? '',
+                    decoration: const InputDecoration(
+                      labelText: 'Seleccionar anfitrión (opcional)',
+                    ),
+                    items: [
+                      const DropdownMenuItem<String>(
+                        value: '',
+                        child: Text('Sin anfitrión'),
+                      ),
+                      ...docs.map((doc) {
+                        final data = doc.data();
+                        final nombre = (data['nombre'] ?? '').toString();
+                        final maxInvitados =
+                            (data['maxInvitados'] ?? 0).toString();
+
+                        return DropdownMenuItem<String>(
+                          value: doc.id,
+                          child: Text('$nombre (cupo: $maxInvitados)'),
+                        );
+                      }),
+                    ],
+                    onChanged: (value) {
+                      if (value == null || value.isEmpty) {
+                        setState(() {
+                          anfitrionSeleccionadoId = null;
+                          anfitrionSeleccionadoNombre = '';
+                          anfitrionUid = '';
+                          anfitrionMaxInvitados = 0;
+                        });
+                        return;
+                      }
+
+                      final seleccionado =
+                          docs.firstWhere((doc) => doc.id == value);
+                      final data = seleccionado.data();
+
+                      setState(() {
+                        anfitrionSeleccionadoId = seleccionado.id;
+                        anfitrionSeleccionadoNombre =
+                            (data['nombre'] ?? '').toString();
+                        anfitrionUid = (data['uidUsuario'] ?? '').toString();
+                        anfitrionMaxInvitados =
+                            (data['maxInvitados'] ?? 0) as int;
+                      });
+                    },
+                  );
+                },
+              ),
+            const SizedBox(height: 16),
             ElevatedButton(
-              onPressed: parsing || importing ? null : procesarTexto,
-              child:
-                  Text(parsing ? 'Validando...' : 'Validar antes de importar'),
+              onPressed: processing ? null : _seleccionarArchivoTxt,
+              child: const Text('Seleccionar archivo TXT'),
             ),
+            if (nombreArchivo.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text('Archivo: $nombreArchivo'),
+            ],
             const SizedBox(height: 12),
-            Text(status),
-            const SizedBox(height: 12),
-            Text('Total revisado: $totalProcesados'),
-            const SizedBox(height: 24),
-            _bloqueValidos(),
-            const SizedBox(height: 24),
-            _bloqueLista(
-              'Inválidos',
-              invalidos,
-              colorTitulo: Colors.red,
+            TextField(
+              controller: textoPegadoController,
+              minLines: 6,
+              maxLines: 12,
+              decoration: const InputDecoration(
+                labelText: 'O pega aquí el contenido',
+                hintText: 'nombre,email,mesa',
+                border: OutlineInputBorder(),
+              ),
             ),
-            const SizedBox(height: 24),
-            _bloqueLista(
-              'Duplicados dentro del texto',
-              duplicadosInternos,
-              colorTitulo: Colors.orange,
-            ),
-            const SizedBox(height: 24),
-            _bloqueLista(
-              'Duplicados ya existentes en el evento',
-              duplicadosEvento,
-              colorTitulo: Colors.deepOrange,
-            ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 8),
+            const Text('Formato por línea: nombre,email,mesa'),
+            const Text('También acepta: nombre;email;mesa o nombre|email|mesa'),
+            const SizedBox(height: 20),
             ElevatedButton(
-              onPressed: importing || validos.isEmpty ? null : importarValidos,
+              onPressed: processing ? null : _procesarCargaMasiva,
               child: Text(
-                importing
-                    ? 'Importando...'
-                    : 'Importar solo válidos y generar QR',
+                processing ? 'Procesando...' : 'Procesar carga masiva',
+              ),
+            ),
+            const SizedBox(height: 24),
+            Text('Procesados: $procesados'),
+            Text('Guardados: $guardados'),
+            Text('Omitidos: $omitidos'),
+            const SizedBox(height: 16),
+            if (detalles.isNotEmpty)
+              const Text(
+                'Detalle de resultados:',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+            const SizedBox(height: 8),
+            ...detalles.map(
+              (e) => Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Text(e),
               ),
             ),
           ],

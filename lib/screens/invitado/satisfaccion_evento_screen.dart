@@ -5,12 +5,14 @@ class SatisfaccionEventoScreen extends StatefulWidget {
   final String eventoId;
   final String invitadoId;
   final String nombreEvento;
+  final String tipoRespondente;
 
   const SatisfaccionEventoScreen({
     super.key,
     required this.eventoId,
     required this.invitadoId,
     required this.nombreEvento,
+    required this.tipoRespondente,
   });
 
   @override
@@ -45,6 +47,7 @@ class _SatisfaccionEventoScreenState extends State<SatisfaccionEventoScreen> {
         'comentario': comentario,
         'gustoMas': gustoMas,
         'sugerencia': sugerencia,
+        'tipoRespondente': widget.tipoRespondente,
         'createdAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
@@ -87,6 +90,9 @@ class _SatisfaccionEventoScreenState extends State<SatisfaccionEventoScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final etiquetaRespondente =
+        widget.tipoRespondente == 'anfitrion' ? 'Anfitrión' : 'Invitado';
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Califica tu experiencia'),
@@ -102,6 +108,8 @@ class _SatisfaccionEventoScreenState extends State<SatisfaccionEventoScreen> {
                 fontWeight: FontWeight.bold,
               ),
             ),
+            const SizedBox(height: 8),
+            Text('Respondente: $etiquetaRespondente'),
             const SizedBox(height: 20),
             const Text(
               '¿Cómo calificarías tu experiencia?',

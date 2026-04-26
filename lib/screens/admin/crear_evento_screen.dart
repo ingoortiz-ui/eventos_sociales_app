@@ -1,8 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-
-import 'panel_evento_screen.dart';
 
 class CrearEventoScreen extends StatefulWidget {
   final String empresaId;
@@ -17,130 +14,167 @@ class CrearEventoScreen extends StatefulWidget {
 }
 
 class _CrearEventoScreenState extends State<CrearEventoScreen> {
-  final nombreEventoController = TextEditingController();
-  final lugarController = TextEditingController();
-  final totalInvitadosController = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
 
-  String tipoEvento = 'boda';
-  int cantidadAnfitriones = 2;
+  final TextEditingController _nombreEventoController = TextEditingController();
+  final TextEditingController _lugarController = TextEditingController();
+  final TextEditingController _totalInvitadosController =
+      TextEditingController();
+  final TextEditingController _cantidadAnfitrionesController =
+      TextEditingController();
+  final TextEditingController _diasGaleriaController =
+      TextEditingController(text: '30');
 
-  DateTime? fechaInicio;
-  TimeOfDay? horaInicio;
-  DateTime? fechaFin;
-  TimeOfDay? horaFin;
+  String? _tipoEvento;
+  String _modoEncuestaExperiencia = 'todos';
 
-  bool saving = false;
+  bool _usaAnfitriones = false;
+  bool _guardando = false;
 
-  void _actualizarCantidadPorTipo(String tipo) {
-    switch (tipo) {
-      case 'boda':
-        cantidadAnfitriones = 2;
-        break;
-      case 'aniversario':
-        cantidadAnfitriones = 2;
-        break;
-      case 'xv_anios':
-        cantidadAnfitriones = 1;
-        break;
-      case 'bautizo':
-        cantidadAnfitriones = 2;
-        break;
-      case 'graduacion':
-        cantidadAnfitriones = 3;
-        break;
-      default:
-        cantidadAnfitriones = 1;
-    }
-  }
+  DateTime? _fechaInicio;
+  TimeOfDay? _horaInicio;
+  DateTime? _fechaFin;
+  TimeOfDay? _horaFin;
 
-  Future<void> seleccionarFechaInicio() async {
+  Future<void> _seleccionarFechaInicio() async {
     final picked = await showDatePicker(
       context: context,
-      initialDate: fechaInicio ?? DateTime.now(),
-      firstDate: DateTime(2025),
+      initialDate: _fechaInicio ?? DateTime.now(),
+      firstDate: DateTime.now().subtract(const Duration(days: 1)),
       lastDate: DateTime(2035),
     );
+
     if (picked != null) {
-      setState(() => fechaInicio = picked);
+      setState(() => _fechaInicio = picked);
     }
   }
 
-  Future<void> seleccionarHoraInicio() async {
+  Future<void> _seleccionarHoraInicio() async {
     final picked = await showTimePicker(
       context: context,
-      initialTime: horaInicio ?? TimeOfDay.now(),
+      initialTime: _horaInicio ?? TimeOfDay.now(),
     );
+
     if (picked != null) {
-      setState(() => horaInicio = picked);
+      setState(() => _horaInicio = picked);
     }
   }
 
-  Future<void> seleccionarFechaFin() async {
+  Future<void> _seleccionarFechaFin() async {
     final picked = await showDatePicker(
       context: context,
-      initialDate: fechaFin ?? (fechaInicio ?? DateTime.now()),
-      firstDate: DateTime(2025),
+      initialDate: _fechaFin ?? (_fechaInicio ?? DateTime.now()),
+      firstDate: _fechaInicio ??
+          DateTime.now().subtract(
+            const Duration(days: 1),
+          ),
       lastDate: DateTime(2035),
     );
+
     if (picked != null) {
-      setState(() => fechaFin = picked);
+      setState(() => _fechaFin = picked);
     }
   }
 
-  Future<void> seleccionarHoraFin() async {
+  Future<void> _seleccionarHoraFin() async {
     final picked = await showTimePicker(
       context: context,
-      initialTime: horaFin ?? TimeOfDay.now(),
+      initialTime: _horaFin ?? TimeOfDay.now(),
     );
+
     if (picked != null) {
-      setState(() => horaFin = picked);
+      setState(() => _horaFin = picked);
     }
   }
 
-  DateTime? _combine(DateTime? date, TimeOfDay? time) {
-    if (date == null || time == null) return null;
-    return DateTime(date.year, date.month, date.day, time.hour, time.minute);
+  DateTime? _combinarFechaHora(DateTime? fecha, TimeOfDay? hora) {
+    if (fecha == null || hora == null) return null;
+
+    return DateTime(
+      fecha.year,
+      fecha.month,
+      fecha.day,
+      hora.hour,
+      hora.minute,
+    );
   }
 
-  Future<void> guardar() async {
-    final nombreEvento = nombreEventoController.text.trim();
-    final lugar = lugarController.text.trim();
-    final totalInvitados =
-        int.tryParse(totalInvitadosController.text.trim()) ?? 0;
+  Future<void> _guardarEvento() async {
+    if (!_formKey.currentState!.validate()) return;
 
-    final inicio = _combine(fechaInicio, horaInicio);
-    final fin = _combine(fechaFin, horaFin);
+    final fechaHoraInicio = _combinarFechaHora(_fechaInicio, _horaInicio);
+    final fechaHoraFin = _combinarFechaHora(_fechaFin, _horaFin);
 
-    if (nombreEvento.isEmpty ||
-        lugar.isEmpty ||
-        totalInvitados <= 0 ||
-        inicio == null ||
-        fin == null ||
-        cantidadAnfitriones <= 0) {
+    if (fechaHoraInicio == null || fechaHoraFin == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Completa todos los campos del evento')),
+        const SnackBar(
+          content: Text('Selecciona fecha y hora de inicio y fin'),
+        ),
       );
       return;
     }
 
-    setState(() => saving = true);
+    if (!fechaHoraFin.isAfter(fechaHoraInicio)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('La fecha/hora de fin debe ser mayor que la de inicio'),
+        ),
+      );
+      return;
+    }
+
+    final totalInvitados =
+        int.tryParse(_totalInvitadosController.text.trim()) ?? 0;
+
+    final cantidadAnfitriones =
+        int.tryParse(_cantidadAnfitrionesController.text.trim()) ?? 0;
+
+    final diasGaleria = int.tryParse(_diasGaleriaController.text.trim()) ?? 30;
+
+    if (_usaAnfitriones && cantidadAnfitriones <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Captura la cantidad máxima de anfitriones'),
+        ),
+      );
+      return;
+    }
+
+    setState(() => _guardando = true);
 
     try {
-      final adminUid = FirebaseAuth.instance.currentUser?.uid ?? '';
+      final fechaExpiracionGaleria =
+          fechaHoraFin.add(Duration(days: diasGaleria));
 
-      final docRef =
-          await FirebaseFirestore.instance.collection('eventos').add({
+      await FirebaseFirestore.instance.collection('eventos').add({
         'empresaId': widget.empresaId,
-        'nombreEvento': nombreEvento,
-        'tipoEvento': tipoEvento,
-        'lugar': lugar,
+        'nombreEvento': _nombreEventoController.text.trim(),
+        'tipoEvento': _tipoEvento,
+        'lugar': _lugarController.text.trim(),
+
+        // Invitados reales. NO incluye anfitriones.
         'totalInvitados': totalInvitados,
-        'cantidadAnfitriones': cantidadAnfitriones,
-        'fechaHoraInicio': Timestamp.fromDate(inicio),
-        'fechaHoraFin': Timestamp.fromDate(fin),
+
+        // Nueva lógica de anfitriones.
+        'usaAnfitriones': _usaAnfitriones,
+        'cantidadAnfitriones': _usaAnfitriones ? cantidadAnfitriones : 0,
+
+        // Encuesta.
+        'modoEncuestaExperiencia': _modoEncuestaExperiencia,
+
+        // El estado siempre inicia abierto.
         'estado': 'abierto',
+
+        // Fechas.
+        'fechaHoraInicio': Timestamp.fromDate(fechaHoraInicio),
+        'fechaHoraFin': Timestamp.fromDate(fechaHoraFin),
+        'fechaExpiracionGaleria': Timestamp.fromDate(fechaExpiracionGaleria),
+
+        // Campos base.
+        'galeriaCompartible': true,
         'croquisUrl': '',
-        'createdBy': adminUid,
+
+        // Auditoría.
         'createdAt': FieldValue.serverTimestamp(),
       });
 
@@ -150,147 +184,245 @@ class _CrearEventoScreenState extends State<CrearEventoScreen> {
         const SnackBar(content: Text('Evento creado correctamente')),
       );
 
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (_) => PanelEventoScreen(
-            eventoId: docRef.id,
-            empresaId: widget.empresaId,
-            nombreEvento: nombreEvento,
-          ),
-        ),
-      );
+      Navigator.pop(context);
     } catch (e) {
       if (!mounted) return;
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error creando evento: $e')),
       );
     } finally {
-      if (mounted) setState(() => saving = false);
+      if (mounted) {
+        setState(() => _guardando = false);
+      }
     }
   }
 
   @override
-  void initState() {
-    super.initState();
-    _actualizarCantidadPorTipo(tipoEvento);
-  }
-
-  @override
   void dispose() {
-    nombreEventoController.dispose();
-    lugarController.dispose();
-    totalInvitadosController.dispose();
+    _nombreEventoController.dispose();
+    _lugarController.dispose();
+    _totalInvitadosController.dispose();
+    _cantidadAnfitrionesController.dispose();
+    _diasGaleriaController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final tipos = [
+    final tiposEvento = [
       'boda',
       'xv_anios',
       'bautizo',
       'graduacion',
       'aniversario',
-      'otro'
+      'corporativo',
+      'otro',
     ];
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Crear evento'),
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
+      body: Form(
+        key: _formKey,
         child: ListView(
+          padding: const EdgeInsets.all(16),
           children: [
-            Text('Empresa: ${widget.empresaId}'),
-            const SizedBox(height: 16),
-            TextField(
-              controller: nombreEventoController,
-              decoration: const InputDecoration(labelText: 'Nombre del evento'),
+            TextFormField(
+              controller: _nombreEventoController,
+              decoration: const InputDecoration(
+                labelText: 'Nombre del evento',
+              ),
+              validator: (value) {
+                if (value == null || value.trim().isEmpty) {
+                  return 'Captura el nombre del evento';
+                }
+                return null;
+              },
             ),
             const SizedBox(height: 12),
             DropdownButtonFormField<String>(
-              value: tipoEvento,
-              items: tipos
-                  .map((t) => DropdownMenuItem(value: t, child: Text(t)))
+              value: _tipoEvento,
+              decoration: const InputDecoration(
+                labelText: 'Tipo de evento',
+              ),
+              hint: const Text('Selecciona tipo de evento'),
+              items: tiposEvento
+                  .map(
+                    (tipo) => DropdownMenuItem(
+                      value: tipo,
+                      child: Text(tipo),
+                    ),
+                  )
                   .toList(),
               onChanged: (value) {
-                if (value != null) {
-                  setState(() {
-                    tipoEvento = value;
-                    _actualizarCantidadPorTipo(value);
-                  });
-                }
+                setState(() => _tipoEvento = value);
               },
-              decoration: const InputDecoration(labelText: 'Tipo de evento'),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: lugarController,
-              decoration: const InputDecoration(labelText: 'Lugar del evento'),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: totalInvitadosController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                  labelText: 'Cantidad total de invitados'),
+              validator: (value) {
+                if (value == null || value.isEmpty) {
+                  return 'Selecciona el tipo de evento';
+                }
+                return null;
+              },
             ),
             const SizedBox(height: 12),
             TextFormField(
-              initialValue: cantidadAnfitriones.toString(),
+              controller: _lugarController,
+              decoration: const InputDecoration(
+                labelText: 'Lugar del evento',
+              ),
+              validator: (value) {
+                if (value == null || value.trim().isEmpty) {
+                  return 'Captura el lugar del evento';
+                }
+                return null;
+              },
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _totalInvitadosController,
               keyboardType: TextInputType.number,
               decoration: const InputDecoration(
-                labelText: 'Cantidad de anfitriones principales',
+                labelText: 'Cantidad total de invitados',
+                helperText: 'No incluye anfitriones',
               ),
+              validator: (value) {
+                if (value == null || value.trim().isEmpty) {
+                  return 'Captura el total de invitados';
+                }
+
+                final n = int.tryParse(value.trim());
+                if (n == null || n <= 0) {
+                  return 'Debe ser un número mayor a cero';
+                }
+
+                return null;
+              },
+            ),
+            const SizedBox(height: 16),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Permitir gestión de anfitriones'),
+              subtitle: const Text(
+                'Los anfitriones serán extra al total de invitados',
+              ),
+              value: _usaAnfitriones,
               onChanged: (value) {
                 setState(() {
-                  cantidadAnfitriones =
-                      int.tryParse(value) ?? cantidadAnfitriones;
+                  _usaAnfitriones = value;
+                  if (!value) {
+                    _cantidadAnfitrionesController.clear();
+                  }
                 });
+              },
+            ),
+            if (_usaAnfitriones) ...[
+              const SizedBox(height: 8),
+              TextFormField(
+                controller: _cantidadAnfitrionesController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Cantidad máxima de anfitriones',
+                ),
+                validator: (value) {
+                  if (!_usaAnfitriones) return null;
+
+                  if (value == null || value.trim().isEmpty) {
+                    return 'Captura la cantidad máxima de anfitriones';
+                  }
+
+                  final n = int.tryParse(value.trim());
+                  if (n == null || n <= 0) {
+                    return 'Debe ser un número mayor a cero';
+                  }
+
+                  return null;
+                },
+              ),
+            ],
+            const SizedBox(height: 16),
+            DropdownButtonFormField<String>(
+              value: _modoEncuestaExperiencia,
+              decoration: const InputDecoration(
+                labelText: 'Quién puede responder encuesta',
+              ),
+              items: const [
+                DropdownMenuItem(
+                  value: 'todos',
+                  child: Text('Todos los invitados'),
+                ),
+                DropdownMenuItem(
+                  value: 'solo_anfitriones',
+                  child: Text('Solo anfitriones'),
+                ),
+              ],
+              onChanged: (value) {
+                if (value != null) {
+                  setState(() => _modoEncuestaExperiencia = value);
+                }
+              },
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _diasGaleriaController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Días de vigencia de la galería',
+              ),
+              validator: (value) {
+                if (value == null || value.trim().isEmpty) {
+                  return 'Captura los días de vigencia';
+                }
+
+                final n = int.tryParse(value.trim());
+                if (n == null || n <= 0) {
+                  return 'Debe ser un número mayor a cero';
+                }
+
+                return null;
               },
             ),
             const SizedBox(height: 20),
             ElevatedButton(
-              onPressed: seleccionarFechaInicio,
+              onPressed: _seleccionarFechaInicio,
               child: Text(
-                fechaInicio == null
-                    ? 'Seleccionar fecha inicio'
-                    : 'Fecha inicio: ${fechaInicio!.day}/${fechaInicio!.month}/${fechaInicio!.year}',
+                _fechaInicio == null
+                    ? 'Seleccionar fecha de inicio'
+                    : 'Fecha inicio: ${_fechaInicio!.day}/${_fechaInicio!.month}/${_fechaInicio!.year}',
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             ElevatedButton(
-              onPressed: seleccionarHoraInicio,
+              onPressed: _seleccionarHoraInicio,
               child: Text(
-                horaInicio == null
-                    ? 'Seleccionar hora inicio'
-                    : 'Hora inicio: ${horaInicio!.format(context)}',
+                _horaInicio == null
+                    ? 'Seleccionar hora de inicio'
+                    : 'Hora inicio: ${_horaInicio!.format(context)}',
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             ElevatedButton(
-              onPressed: seleccionarFechaFin,
+              onPressed: _seleccionarFechaFin,
               child: Text(
-                fechaFin == null
-                    ? 'Seleccionar fecha fin'
-                    : 'Fecha fin: ${fechaFin!.day}/${fechaFin!.month}/${fechaFin!.year}',
+                _fechaFin == null
+                    ? 'Seleccionar fecha de fin'
+                    : 'Fecha fin: ${_fechaFin!.day}/${_fechaFin!.month}/${_fechaFin!.year}',
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             ElevatedButton(
-              onPressed: seleccionarHoraFin,
+              onPressed: _seleccionarHoraFin,
               child: Text(
-                horaFin == null
-                    ? 'Seleccionar hora fin'
-                    : 'Hora fin: ${horaFin!.format(context)}',
+                _horaFin == null
+                    ? 'Seleccionar hora de fin'
+                    : 'Hora fin: ${_horaFin!.format(context)}',
               ),
             ),
             const SizedBox(height: 24),
             ElevatedButton(
-              onPressed: saving ? null : guardar,
-              child: Text(saving ? 'Guardando...' : 'Guardar evento'),
+              onPressed: _guardando ? null : _guardarEvento,
+              child: Text(_guardando ? 'Guardando...' : 'Guardar evento'),
             ),
           ],
         ),

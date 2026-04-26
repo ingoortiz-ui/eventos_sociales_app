@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
@@ -24,10 +25,53 @@ class ScannerScreen extends StatefulWidget {
 
 class _ScannerScreenState extends State<ScannerScreen> {
   bool procesando = false;
+
   String resultado = 'Escanea un código QR';
   String nombreInvitado = '';
   String mesaInvitado = '';
   String invitadoDe = '';
+  String tipoRegistro = '';
+  String estadoActual = '';
+  String croquisUrl = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _cargarCroquis();
+  }
+
+  Future<void> _cargarCroquis() async {
+    final doc = await FirebaseFirestore.instance
+        .collection('eventos')
+        .doc(widget.eventoId)
+        .get();
+
+    final data = doc.data() ?? {};
+
+    if (!mounted) return;
+
+    setState(() {
+      croquisUrl = (data['croquisUrl'] ?? '').toString();
+    });
+  }
+
+  void _verCroquis() {
+    if (croquisUrl.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Este evento no tiene croquis cargado')),
+      );
+      return;
+    }
+
+    showDialog(
+      context: context,
+      builder: (_) => Dialog(
+        child: InteractiveViewer(
+          child: Image.network(croquisUrl),
+        ),
+      ),
+    );
+  }
 
   Map<String, dynamic>? _parsePayload(String rawValue) {
     try {
@@ -50,6 +94,42 @@ class _ScannerScreenState extends State<ScannerScreen> {
     }
   }
 
+  Future<Map<String, dynamic>> _cargarUsuarioActual() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+
+    if (uid.isEmpty) {
+      return {
+        'uid': '',
+        'rol': '',
+        'nombre': '',
+        'email': '',
+      };
+    }
+
+    final doc =
+        await FirebaseFirestore.instance.collection('usuarios').doc(uid).get();
+
+    final data = doc.data() ?? {};
+
+    return {
+      'uid': uid,
+      'rol': (data['rol'] ?? '').toString(),
+      'nombre': (data['nombre'] ?? '').toString(),
+      'email': (data['email'] ?? '').toString(),
+    };
+  }
+
+  void _limpiarResultado(String mensaje) {
+    setState(() {
+      resultado = mensaje;
+      nombreInvitado = '';
+      mesaInvitado = '';
+      invitadoDe = '';
+      tipoRegistro = '';
+      estadoActual = '';
+    });
+  }
+
   Future<void> procesarQR(String rawValue) async {
     if (procesando) return;
 
@@ -62,12 +142,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
       final payload = _parsePayload(rawValue);
 
       if (payload == null) {
-        setState(() {
-          resultado = 'QR inválido';
-          nombreInvitado = '';
-          mesaInvitado = '';
-          invitadoDe = '';
-        });
+        _limpiarResultado('QR inválido');
         return;
       }
 
@@ -79,22 +154,12 @@ class _ScannerScreenState extends State<ScannerScreen> {
           .trim();
 
       if (qrEventoId.isEmpty || invitadoId.isEmpty) {
-        setState(() {
-          resultado = 'QR inválido';
-          nombreInvitado = '';
-          mesaInvitado = '';
-          invitadoDe = '';
-        });
+        _limpiarResultado('QR inválido');
         return;
       }
 
       if (qrEventoId != widget.eventoId) {
-        setState(() {
-          resultado = 'Este QR no pertenece al evento activo';
-          nombreInvitado = '';
-          mesaInvitado = '';
-          invitadoDe = '';
-        });
+        _limpiarResultado('Este QR no pertenece al evento activo');
         return;
       }
 
@@ -107,21 +172,25 @@ class _ScannerScreenState extends State<ScannerScreen> {
       final doc = await docRef.get();
 
       if (!doc.exists) {
-        setState(() {
-          resultado = 'Invitado no encontrado';
-          nombreInvitado = '';
-          mesaInvitado = '';
-          invitadoDe = '';
-        });
+        _limpiarResultado('Invitado no encontrado');
         return;
       }
 
       final data = doc.data() ?? {};
+
       final nombre =
           (data['nombre_invitado'] ?? data['nombre'] ?? '').toString();
+
       final mesa = (data['mesa'] ?? '').toString();
-      final invitadoPor = (data['invitadoDe'] ?? '').toString();
+
+      final invitadoPor =
+          (data['anfitrionNombre'] ?? data['invitadoDe'] ?? '').toString();
+
       final estado = (data['estado_asistencia'] ?? 'pendiente').toString();
+
+      final esAnfitrion = data['esAnfitrion'] == true;
+
+      final tipo = esAnfitrion ? 'Anfitrión' : 'Invitado';
 
       if (estado == 'ingresado') {
         setState(() {
@@ -129,13 +198,22 @@ class _ScannerScreenState extends State<ScannerScreen> {
           nombreInvitado = nombre;
           mesaInvitado = mesa;
           invitadoDe = invitadoPor;
+          tipoRegistro = tipo;
+          estadoActual = estado;
         });
         return;
       }
 
+      final usuarioActual = await _cargarUsuarioActual();
+
       await docRef.update({
         'estado_asistencia': 'ingresado',
         'checkInAt': FieldValue.serverTimestamp(),
+        'horaIngreso': FieldValue.serverTimestamp(),
+        'ingresadoPorUid': (usuarioActual['uid'] ?? '').toString(),
+        'ingresadoPorRol': (usuarioActual['rol'] ?? '').toString(),
+        'ingresadoPorNombre': (usuarioActual['nombre'] ?? '').toString(),
+        'updatedAt': FieldValue.serverTimestamp(),
       });
 
       setState(() {
@@ -143,14 +221,11 @@ class _ScannerScreenState extends State<ScannerScreen> {
         nombreInvitado = nombre;
         mesaInvitado = mesa;
         invitadoDe = invitadoPor;
+        tipoRegistro = tipo;
+        estadoActual = 'ingresado';
       });
     } catch (e) {
-      setState(() {
-        resultado = 'Error al escanear: $e';
-        nombreInvitado = '';
-        mesaInvitado = '';
-        invitadoDe = '';
-      });
+      _limpiarResultado('Error al escanear: $e');
     } finally {
       await Future.delayed(const Duration(seconds: 2));
       if (mounted) {
@@ -169,6 +244,12 @@ class _ScannerScreenState extends State<ScannerScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.nombreEvento),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.map),
+            onPressed: _verCroquis,
+          ),
+        ],
       ),
       body: Column(
         children: [
@@ -187,6 +268,11 @@ class _ScannerScreenState extends State<ScannerScreen> {
                 ),
                 Text(widget.horarioEvento),
                 Text(widget.estadoVisible),
+                Text(
+                  croquisUrl.isEmpty
+                      ? 'Croquis: no cargado'
+                      : 'Croquis: disponible en el ícono de mapa',
+                ),
                 const SizedBox(height: 8),
                 SelectableText('Evento ID: ${widget.eventoId}'),
               ],
@@ -207,10 +293,10 @@ class _ScannerScreenState extends State<ScannerScreen> {
             ),
           ),
           Expanded(
-            flex: 3,
+            flex: 4,
             child: Padding(
               padding: const EdgeInsets.all(16),
-              child: Column(
+              child: ListView(
                 children: [
                   Text(
                     resultado,
@@ -222,33 +308,82 @@ class _ScannerScreenState extends State<ScannerScreen> {
                   ),
                   const SizedBox(height: 12),
                   if (nombreInvitado.isNotEmpty) ...[
-                    Text('Invitado: $nombreInvitado'),
+                    Text('Nombre: $nombreInvitado'),
+                    Text('Tipo: $tipoRegistro'),
                     Text('Mesa: $mesaInvitado'),
                     if (invitadoDe.isNotEmpty) Text('Invitado de: $invitadoDe'),
+                    if (estadoActual.isNotEmpty)
+                      Text('Estado actual: $estadoActual'),
                   ],
                   const SizedBox(height: 20),
                   StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
                     stream: invitadosRef.snapshots(),
                     builder: (context, snapshot) {
                       if (!snapshot.hasData) {
-                        return const CircularProgressIndicator();
+                        return const Center(child: CircularProgressIndicator());
                       }
 
                       final docs = snapshot.data!.docs;
-                      final total = docs.length;
-                      final ingresados = docs
-                          .where((d) =>
-                              (d.data()['estado_asistencia'] ?? '') ==
-                              'ingresado')
-                          .length;
-                      final faltan = total - ingresados;
 
-                      return Column(
-                        children: [
-                          Text('Total invitados: $total'),
-                          Text('Ingresados: $ingresados'),
-                          Text('Faltan: $faltan'),
-                        ],
+                      final invitadosReales = docs.where((d) {
+                        final data = d.data();
+                        return data['esAnfitrion'] != true;
+                      }).toList();
+
+                      final anfitriones = docs.where((d) {
+                        final data = d.data();
+                        return data['esAnfitrion'] == true;
+                      }).toList();
+
+                      final invitadosIngresados = invitadosReales.where((d) {
+                        return (d.data()['estado_asistencia'] ?? '') ==
+                            'ingresado';
+                      }).length;
+
+                      final anfitrionesIngresados = anfitriones.where((d) {
+                        return (d.data()['estado_asistencia'] ?? '') ==
+                            'ingresado';
+                      }).length;
+
+                      final totalInvitados = invitadosReales.length;
+                      final totalAnfitriones = anfitriones.length;
+
+                      final faltanInvitados =
+                          totalInvitados - invitadosIngresados;
+                      final faltanAnfitriones =
+                          totalAnfitriones - anfitrionesIngresados;
+
+                      return Card(
+                        child: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Column(
+                            children: [
+                              const Text(
+                                'Resumen de acceso',
+                                style: TextStyle(fontWeight: FontWeight.bold),
+                              ),
+                              const SizedBox(height: 8),
+                              Text('Invitados registrados: $totalInvitados'),
+                              Text(
+                                  'Invitados ingresados: $invitadosIngresados'),
+                              Text('Invitados faltantes: $faltanInvitados'),
+                              const Divider(),
+                              Text(
+                                  'Anfitriones registrados: $totalAnfitriones'),
+                              Text(
+                                'Anfitriones ingresados: $anfitrionesIngresados',
+                              ),
+                              Text('Anfitriones faltantes: $faltanAnfitriones'),
+                              const Divider(),
+                              Text(
+                                'Total personas registradas: ${totalInvitados + totalAnfitriones}',
+                              ),
+                              Text(
+                                'Total personas ingresadas: ${invitadosIngresados + anfitrionesIngresados}',
+                              ),
+                            ],
+                          ),
+                        ),
                       );
                     },
                   ),

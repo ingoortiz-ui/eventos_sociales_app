@@ -22,7 +22,11 @@ class InvitadoEventoDetalleScreen extends StatelessWidget {
     final inicioTs = evento['fechaHoraInicio'];
     final finTs = evento['fechaHoraFin'];
 
-    if (estado != 'abierto') return false;
+    if (estado == 'cerrado' ||
+        estado == 'archivado' ||
+        estado == 'finalizado') {
+      return false;
+    }
     if (inicioTs == null || finTs == null) return false;
 
     final inicio = (inicioTs as Timestamp).toDate();
@@ -43,9 +47,14 @@ class InvitadoEventoDetalleScreen extends StatelessWidget {
         .doc(invitadoId)
         .get();
 
+    final evento = eventoDoc.data() ?? {};
+    final invitado = invitadoDoc.data() ?? {};
+
     return {
-      'evento': eventoDoc.data() ?? {},
-      'invitado': invitadoDoc.data() ?? {},
+      'evento': evento,
+      'invitado': invitado,
+      'esAnfitrion': invitado['esAnfitrion'] == true,
+      'anfitrionId': (invitado['anfitrionId'] ?? '').toString(),
     };
   }
 
@@ -74,6 +83,8 @@ class InvitadoEventoDetalleScreen extends StatelessWidget {
           final data = snapshot.data ?? {};
           final evento = (data['evento'] ?? {}) as Map<String, dynamic>;
           final invitado = (data['invitado'] ?? {}) as Map<String, dynamic>;
+          final esAnfitrion = (data['esAnfitrion'] ?? false) as bool;
+          final anfitrionId = (data['anfitrionId'] ?? '').toString();
 
           final nombreEvento = (evento['nombreEvento'] ?? '').toString();
           final lugar = (evento['lugar'] ?? '').toString();
@@ -82,9 +93,14 @@ class InvitadoEventoDetalleScreen extends StatelessWidget {
           final mesa = (invitado['mesa'] ?? '').toString();
           final estadoAsistencia =
               (invitado['estado_asistencia'] ?? 'pendiente').toString();
+          final modoEncuesta =
+              (evento['modoEncuestaExperiencia'] ?? 'todos').toString();
 
           final eventoActivo = _eventoActivo(evento);
           final puedeSubir = eventoActivo && estadoAsistencia == 'ingresado';
+
+          final puedeResponderEncuesta = modoEncuesta == 'todos' ||
+              (modoEncuesta == 'solo_anfitriones' && esAnfitrion);
 
           return Padding(
             padding: const EdgeInsets.all(16),
@@ -103,6 +119,10 @@ class InvitadoEventoDetalleScreen extends StatelessWidget {
                 Text('Mesa: $mesa'),
                 Text('Estado de ingreso: $estadoAsistencia'),
                 Text('Evento activo: ${eventoActivo ? "Sí" : "No"}'),
+                Text(
+                  'Encuesta: ${modoEncuesta == "todos" ? "Todos los invitados" : "Solo anfitriones"}',
+                ),
+                if (esAnfitrion) const Text('Rol en este evento: anfitrión'),
                 const SizedBox(height: 24),
                 ElevatedButton(
                   onPressed: puedeSubir
@@ -126,28 +146,44 @@ class InvitadoEventoDetalleScreen extends StatelessWidget {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) => GaleriaEventoScreen(eventoId: eventoId),
-                      ),
-                    );
-                  },
-                  child: const Text('Ver galería del evento'),
-                ),
-                const SizedBox(height: 12),
-                ElevatedButton(
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => SatisfaccionEventoScreen(
+                        builder: (_) => GaleriaEventoScreen(
                           eventoId: eventoId,
                           invitadoId: invitadoId,
-                          nombreEvento: nombreEvento,
+                          esAnfitrion: esAnfitrion,
+                          anfitrionId: anfitrionId,
                         ),
                       ),
                     );
                   },
-                  child: const Text('Calificar mi experiencia'),
+                  child: Text(
+                    esAnfitrion
+                        ? 'Ver mis fotos y las de mis invitados'
+                        : 'Ver mis fotos',
+                  ),
                 ),
+                const SizedBox(height: 12),
+                if (puedeResponderEncuesta)
+                  ElevatedButton(
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => SatisfaccionEventoScreen(
+                            eventoId: eventoId,
+                            invitadoId: invitadoId,
+                            nombreEvento: nombreEvento,
+                            tipoRespondente:
+                                esAnfitrion ? 'anfitrion' : 'invitado',
+                          ),
+                        ),
+                      );
+                    },
+                    child: const Text('Calificar mi experiencia'),
+                  ),
+                if (!puedeResponderEncuesta)
+                  const Text(
+                    'La encuesta de experiencia está habilitada solo para anfitriones en este evento.',
+                  ),
                 const SizedBox(height: 12),
                 ElevatedButton(
                   onPressed: () {
