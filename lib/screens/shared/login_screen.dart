@@ -1,6 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../../theme/app_theme.dart';
 import 'registro_empresa_screen.dart';
 import 'registro_usuario_screen.dart';
 
@@ -92,77 +93,127 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 420),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const Icon(Icons.event_available, size: 80),
-                const SizedBox(height: 16),
-                const Text(
-                  'Eventos',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 30,
-                    fontWeight: FontWeight.bold,
+      backgroundColor: AppTheme.background,
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 430),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(22),
+                    decoration: BoxDecoration(
+                      color: AppTheme.primary.withOpacity(0.10),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.event_available,
+                      size: 74,
+                      color: AppTheme.primary,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'Acceso para empresas, anfitriones, invitados y usuarios',
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 32),
-                TextField(
-                  controller: emailController,
-                  keyboardType: TextInputType.emailAddress,
-                  decoration: const InputDecoration(
-                    labelText: 'Correo',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.email),
+                  const SizedBox(height: 22),
+                  const Text(
+                    'Eventia',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 34,
+                      fontWeight: FontWeight.w900,
+                      color: AppTheme.textDark,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: passwordController,
-                  obscureText: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Contraseña',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.lock),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Eventos, reservaciones y servicios en una sola plataforma.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 15,
+                      color: AppTheme.textMuted,
+                    ),
                   ),
-                  onSubmitted: (_) {
-                    if (!loading) _login();
-                  },
-                ),
-                const SizedBox(height: 20),
-                ElevatedButton(
-                  onPressed: loading ? null : _login,
-                  child: Text(loading ? 'Ingresando...' : 'Ingresar'),
-                ),
-                const SizedBox(height: 12),
-                OutlinedButton.icon(
-                  icon: const Icon(Icons.business),
-                  label: const Text('Crear empresa'),
-                  onPressed: loading ? null : _abrirRegistroEmpresa,
-                ),
-                const SizedBox(height: 12),
-                OutlinedButton.icon(
-                  icon: const Icon(Icons.person_add),
-                  label: const Text('Crear usuario'),
-                  onPressed: loading ? null : _abrirRegistroUsuario,
-                ),
-                const SizedBox(height: 16),
-                const Text(
-                  'Si tu empresa ya está registrada, ingresa con el correo asignado.\n'
-                  'Si solo deseas consultar eventos, reservaciones o servicios, crea un usuario.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 12),
-                ),
-              ],
+                  const SizedBox(height: 28),
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(18),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          const Text(
+                            'Iniciar sesión',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w800,
+                              color: AppTheme.textDark,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          TextField(
+                            controller: emailController,
+                            keyboardType: TextInputType.emailAddress,
+                            decoration: const InputDecoration(
+                              labelText: 'Correo',
+                              prefixIcon: Icon(Icons.email_outlined),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          TextField(
+                            controller: passwordController,
+                            obscureText: true,
+                            decoration: const InputDecoration(
+                              labelText: 'Contraseña',
+                              prefixIcon: Icon(Icons.lock_outline),
+                            ),
+                            onSubmitted: (_) {
+                              if (!loading) _login();
+                            },
+                          ),
+                          const SizedBox(height: 18),
+                          ElevatedButton(
+                            onPressed: loading ? null : _login,
+                            child: Text(
+                              loading ? 'Ingresando...' : 'Ingresar',
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  const Text(
+                    '¿Qué deseas crear?',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      color: AppTheme.textDark,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.business_outlined),
+                    label: const Text('Crear empresa'),
+                    onPressed: loading ? null : _abrirRegistroEmpresa,
+                  ),
+                  const SizedBox(height: 10),
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.person_add_alt_1_outlined),
+                    label: const Text('Crear usuario'),
+                    onPressed: loading ? null : _abrirRegistroUsuario,
+                  ),
+                  const SizedBox(height: 18),
+                  const Text(
+                    'Empresas gestionan eventos, reservas y servicios.\n'
+                    'Usuarios consultan invitaciones, reservaciones y cotizaciones.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: AppTheme.textMuted,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

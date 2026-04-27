@@ -2,6 +2,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../../theme/app_theme.dart';
+
 class RegistroUsuarioScreen extends StatefulWidget {
   const RegistroUsuarioScreen({super.key});
 
@@ -49,7 +51,6 @@ class _RegistroUsuarioScreenState extends State<RegistroUsuarioScreen> {
       });
 
       if (!mounted) return;
-
       Navigator.pop(context);
     } on FirebaseAuthException catch (e) {
       String mensaje = 'Error registrando usuario';
@@ -63,13 +64,11 @@ class _RegistroUsuarioScreenState extends State<RegistroUsuarioScreen> {
       }
 
       if (!mounted) return;
-
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(mensaje)),
       );
     } catch (e) {
       if (!mounted) return;
-
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error: $e')),
       );
@@ -89,6 +88,7 @@ class _RegistroUsuarioScreenState extends State<RegistroUsuarioScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppTheme.background,
       appBar: AppBar(
         title: const Text('Crear usuario'),
       ),
@@ -96,58 +96,74 @@ class _RegistroUsuarioScreenState extends State<RegistroUsuarioScreen> {
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 420),
+            constraints: const BoxConstraints(maxWidth: 430),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Icon(Icons.person_add, size: 72),
-                const SizedBox(height: 16),
+                const Icon(
+                  Icons.person_add_alt_1_outlined,
+                  size: 72,
+                  color: AppTheme.primary,
+                ),
+                const SizedBox(height: 18),
                 const Text(
-                  'Crear cuenta de usuario',
+                  'Crea tu cuenta',
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    fontSize: 26,
-                    fontWeight: FontWeight.bold,
+                    fontSize: 28,
+                    fontWeight: FontWeight.w900,
+                    color: AppTheme.textDark,
                   ),
                 ),
                 const SizedBox(height: 8),
                 const Text(
-                  'Usa esta cuenta para consultar eventos, reservaciones y servicios donde participes.',
+                  'Consulta tus eventos, reservaciones y servicios desde un solo lugar.',
                   textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 28),
-                TextField(
-                  controller: nombreController,
-                  decoration: const InputDecoration(
-                    labelText: 'Nombre completo',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.person),
+                  style: TextStyle(
+                    color: AppTheme.textMuted,
                   ),
                 ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: emailController,
-                  keyboardType: TextInputType.emailAddress,
-                  decoration: const InputDecoration(
-                    labelText: 'Correo',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.email),
+                const SizedBox(height: 24),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(18),
+                    child: Column(
+                      children: [
+                        TextField(
+                          controller: nombreController,
+                          decoration: const InputDecoration(
+                            labelText: 'Nombre completo',
+                            prefixIcon: Icon(Icons.person_outline),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: emailController,
+                          keyboardType: TextInputType.emailAddress,
+                          decoration: const InputDecoration(
+                            labelText: 'Correo',
+                            prefixIcon: Icon(Icons.email_outlined),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: passwordController,
+                          obscureText: true,
+                          decoration: const InputDecoration(
+                            labelText: 'Contraseña',
+                            prefixIcon: Icon(Icons.lock_outline),
+                          ),
+                        ),
+                        const SizedBox(height: 18),
+                        ElevatedButton(
+                          onPressed: loading ? null : _registrarUsuario,
+                          child: Text(
+                            loading ? 'Creando cuenta...' : 'Crear usuario',
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: passwordController,
-                  obscureText: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Contraseña',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.lock),
-                  ),
-                ),
-                const SizedBox(height: 20),
-                ElevatedButton(
-                  onPressed: loading ? null : _registrarUsuario,
-                  child: Text(loading ? 'Creando cuenta...' : 'Crear usuario'),
                 ),
               ],
             ),
