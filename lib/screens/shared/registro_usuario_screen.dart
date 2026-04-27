@@ -1,29 +1,29 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
-import 'registro_empresa_screen.dart';
-import 'registro_usuario_screen.dart';
-
-class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+class RegistroUsuarioScreen extends StatefulWidget {
+  const RegistroUsuarioScreen({super.key});
 
   @override
-  State<LoginScreen> createState() => _LoginScreenState();
+  State<RegistroUsuarioScreen> createState() => _RegistroUsuarioScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> {
+class _RegistroUsuarioScreenState extends State<RegistroUsuarioScreen> {
+  final nombreController = TextEditingController();
   final emailController = TextEditingController();
   final passwordController = TextEditingController();
 
   bool loading = false;
 
-  Future<void> _login() async {
+  Future<void> _registrarUsuario() async {
+    final nombre = nombreController.text.trim();
     final email = emailController.text.trim().toLowerCase();
     final password = passwordController.text.trim();
 
-    if (email.isEmpty || password.isEmpty) {
+    if (nombre.isEmpty || email.isEmpty || password.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Ingresa correo y contraseña')),
+        const SnackBar(content: Text('Completa todos los campos')),
       );
       return;
     }
@@ -31,21 +31,35 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => loading = true);
 
     try {
-      await FirebaseAuth.instance.signInWithEmailAndPassword(
+      final cred = await FirebaseAuth.instance.createUserWithEmailAndPassword(
         email: email,
         password: password,
       );
-    } on FirebaseAuthException catch (e) {
-      String mensaje = 'Error al iniciar sesión';
 
-      if (e.code == 'user-not-found') {
-        mensaje = 'Usuario no encontrado';
-      } else if (e.code == 'wrong-password') {
-        mensaje = 'Contraseña incorrecta';
+      final uid = cred.user!.uid;
+
+      await FirebaseFirestore.instance.collection('usuarios').doc(uid).set({
+        'uid': uid,
+        'nombre': nombre,
+        'email': email,
+        'rol': 'usuario',
+        'empresaId': 'sin_empresa',
+        'activo': true,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      if (!mounted) return;
+
+      Navigator.pop(context);
+    } on FirebaseAuthException catch (e) {
+      String mensaje = 'Error registrando usuario';
+
+      if (e.code == 'email-already-in-use') {
+        mensaje = 'Ese correo ya tiene una cuenta';
+      } else if (e.code == 'weak-password') {
+        mensaje = 'La contraseña debe ser más segura';
       } else if (e.code == 'invalid-email') {
         mensaje = 'Correo inválido';
-      } else if (e.code == 'invalid-credential') {
-        mensaje = 'Correo o contraseña incorrectos';
       }
 
       if (!mounted) return;
@@ -64,26 +78,9 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  void _abrirRegistroEmpresa() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => const RegistroEmpresaScreen(),
-      ),
-    );
-  }
-
-  void _abrirRegistroUsuario() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => const RegistroUsuarioScreen(),
-      ),
-    );
-  }
-
   @override
   void dispose() {
+    nombreController.dispose();
     emailController.dispose();
     passwordController.dispose();
     super.dispose();
@@ -92,6 +89,9 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      appBar: AppBar(
+        title: const Text('Crear usuario'),
+      ),
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
@@ -100,22 +100,31 @@ class _LoginScreenState extends State<LoginScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Icon(Icons.event_available, size: 80),
+                const Icon(Icons.person_add, size: 72),
                 const SizedBox(height: 16),
                 const Text(
-                  'Eventos',
+                  'Crear cuenta de usuario',
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    fontSize: 30,
+                    fontSize: 26,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
                 const SizedBox(height: 8),
                 const Text(
-                  'Acceso para empresas, anfitriones, invitados y usuarios',
+                  'Usa esta cuenta para consultar eventos, reservaciones y servicios donde participes.',
                   textAlign: TextAlign.center,
                 ),
-                const SizedBox(height: 32),
+                const SizedBox(height: 28),
+                TextField(
+                  controller: nombreController,
+                  decoration: const InputDecoration(
+                    labelText: 'Nombre completo',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.person),
+                  ),
+                ),
+                const SizedBox(height: 12),
                 TextField(
                   controller: emailController,
                   keyboardType: TextInputType.emailAddress,
@@ -134,33 +143,11 @@ class _LoginScreenState extends State<LoginScreen> {
                     border: OutlineInputBorder(),
                     prefixIcon: Icon(Icons.lock),
                   ),
-                  onSubmitted: (_) {
-                    if (!loading) _login();
-                  },
                 ),
                 const SizedBox(height: 20),
                 ElevatedButton(
-                  onPressed: loading ? null : _login,
-                  child: Text(loading ? 'Ingresando...' : 'Ingresar'),
-                ),
-                const SizedBox(height: 12),
-                OutlinedButton.icon(
-                  icon: const Icon(Icons.business),
-                  label: const Text('Crear empresa'),
-                  onPressed: loading ? null : _abrirRegistroEmpresa,
-                ),
-                const SizedBox(height: 12),
-                OutlinedButton.icon(
-                  icon: const Icon(Icons.person_add),
-                  label: const Text('Crear usuario'),
-                  onPressed: loading ? null : _abrirRegistroUsuario,
-                ),
-                const SizedBox(height: 16),
-                const Text(
-                  'Si tu empresa ya está registrada, ingresa con el correo asignado.\n'
-                  'Si solo deseas consultar eventos, reservaciones o servicios, crea un usuario.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 12),
+                  onPressed: loading ? null : _registrarUsuario,
+                  child: Text(loading ? 'Creando cuenta...' : 'Crear usuario'),
                 ),
               ],
             ),

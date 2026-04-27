@@ -7,6 +7,7 @@ import '../anfitrion/anfitrion_home_screen.dart';
 import '../capitan/cap_meseros_home_screen.dart';
 import '../hostess/hostess_home_screen.dart';
 import '../invitado/invitado_home_screen.dart';
+import '../usuario/usuario_home_screen.dart';
 import 'login_screen.dart';
 
 class RoleRouterScreen extends StatelessWidget {
@@ -18,6 +19,7 @@ class RoleRouterScreen extends StatelessWidget {
     final db = FirebaseFirestore.instance;
 
     final uidDoc = await db.collection('usuarios').doc(user.uid).get();
+
     if (uidDoc.exists) {
       return uidDoc.data();
     }
@@ -26,26 +28,41 @@ class RoleRouterScreen extends StatelessWidget {
     if (email == null || email.trim().isEmpty) return null;
 
     final emailKey = _normalizeEmail(email);
+
     final configDoc =
         await db.collection('usuarios_config').doc(emailKey).get();
 
-    if (!configDoc.exists) return null;
+    if (configDoc.exists) {
+      final data = configDoc.data() ?? {};
 
-    final data = configDoc.data() ?? {};
+      final userData = {
+        ...data,
+        'uid': user.uid,
+        'email': emailKey,
+        'migratedAt': FieldValue.serverTimestamp(),
+      };
 
-    final userData = {
-      ...data,
+      await db
+          .collection('usuarios')
+          .doc(user.uid)
+          .set(userData, SetOptions(merge: true));
+
+      return userData;
+    }
+
+    final defaultUser = {
       'uid': user.uid,
+      'nombre': emailKey,
       'email': emailKey,
-      'migratedAt': FieldValue.serverTimestamp(),
+      'rol': 'usuario',
+      'empresaId': 'sin_empresa',
+      'activo': true,
+      'createdAt': FieldValue.serverTimestamp(),
     };
 
-    await db.collection('usuarios').doc(user.uid).set(
-          userData,
-          SetOptions(merge: true),
-        );
+    await db.collection('usuarios').doc(user.uid).set(defaultUser);
 
-    return userData;
+    return defaultUser;
   }
 
   @override
@@ -107,7 +124,7 @@ class RoleRouterScreen extends StatelessWidget {
 
         final rol = (data['rol'] ?? '').toString().trim();
         final activo = data['activo'] == true;
-        final empresaId = (data['empresaId'] ?? '').toString();
+        final empresaId = (data['empresaId'] ?? 'sin_empresa').toString();
         final nombre = (data['nombre'] ?? '').toString();
         final email = (data['email'] ?? user.email ?? '').toString();
 
@@ -159,6 +176,9 @@ class RoleRouterScreen extends StatelessWidget {
               empresaId: empresaId,
             );
 
+          case 'anfitrion':
+            return const AnfitrionHomeScreen();
+
           case 'invitado':
             return InvitadoHomeScreen(
               nombre: nombre,
@@ -166,18 +186,18 @@ class RoleRouterScreen extends StatelessWidget {
               empresaId: empresaId,
             );
 
-          case 'anfitrion':
-            return const AnfitrionHomeScreen();
+          case 'usuario':
+            return UsuarioHomeScreen(
+              nombre: nombre,
+              email: email,
+              empresaId: empresaId,
+            );
 
           default:
-            return Scaffold(
-              appBar: AppBar(title: const Text('Rol no válido')),
-              body: Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Text('Rol no válido: $rol'),
-                ),
-              ),
+            return UsuarioHomeScreen(
+              nombre: nombre,
+              email: email,
+              empresaId: empresaId,
             );
         }
       },

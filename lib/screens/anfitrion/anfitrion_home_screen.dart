@@ -8,27 +8,13 @@ import 'anfitrion_evento_detalle_screen.dart';
 class AnfitrionHomeScreen extends StatelessWidget {
   const AnfitrionHomeScreen({super.key});
 
-  String _normalizarCorreo(String email) => email.trim().toLowerCase();
+  String _normalizarCorreo(String email) {
+    return email.trim().toLowerCase();
+  }
 
-  Future<Map<String, String>> _contexto() async {
+  Future<String> _obtenerEmail() async {
     final user = FirebaseAuth.instance.currentUser;
-
-    if (user == null) {
-      return {'email': '', 'empresaId': '', 'uid': ''};
-    }
-
-    final userDoc = await FirebaseFirestore.instance
-        .collection('usuarios')
-        .doc(user.uid)
-        .get();
-
-    final data = userDoc.data() ?? {};
-
-    return {
-      'email': _normalizarCorreo(user.email ?? ''),
-      'empresaId': (data['empresaId'] ?? '').toString(),
-      'uid': user.uid,
-    };
+    return _normalizarCorreo(user?.email ?? '');
   }
 
   DateTime? _parseFecha(dynamic value) {
@@ -128,7 +114,6 @@ class AnfitrionHomeScreen extends StatelessWidget {
   Widget _seccionAnfitrion(
     BuildContext context,
     List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
-    String empresaId,
   ) {
     if (docs.isEmpty) {
       return const Padding(
@@ -147,13 +132,15 @@ class AnfitrionHomeScreen extends StatelessWidget {
         final anfitrionId = (data['anfitrionId'] ?? '').toString();
         final nombreEvento = (data['nombreEvento'] ?? 'Evento').toString();
         final nombrePersona = (data['nombrePersona'] ?? '').toString();
+        final empresa = (data['empresaNombre'] ?? '').toString();
         final estado = _textoEstado(_estadoVisual(data));
 
         return ListTile(
           title: Text(nombreEvento),
           subtitle: Text(
             'Modo: anfitrión\n'
-            'Anfitrión: $nombrePersona\n'
+            'Nombre: $nombrePersona\n'
+            '${empresa.isNotEmpty ? "Empresa: $empresa\n" : ""}'
             'Estado: $estado',
           ),
           isThreeLine: true,
@@ -165,7 +152,7 @@ class AnfitrionHomeScreen extends StatelessWidget {
                     MaterialPageRoute(
                       builder: (_) => AnfitrionEventoDetalleScreen(
                         eventoId: eventoId,
-                        empresaId: empresaId,
+                        empresaId: data['empresaId'] ?? '',
                         anfitrionId: anfitrionId,
                       ),
                     ),
@@ -197,13 +184,15 @@ class AnfitrionHomeScreen extends StatelessWidget {
         final invitadoId = (data['invitadoId'] ?? '').toString();
         final nombreEvento = (data['nombreEvento'] ?? 'Evento').toString();
         final nombrePersona = (data['nombrePersona'] ?? '').toString();
+        final empresa = (data['empresaNombre'] ?? '').toString();
         final estado = _textoEstado(_estadoVisual(data));
 
         return ListTile(
           title: Text(nombreEvento),
           subtitle: Text(
             'Modo: invitado\n'
-            'Invitado: $nombrePersona\n'
+            'Nombre: $nombrePersona\n'
+            '${empresa.isNotEmpty ? "Empresa: $empresa\n" : ""}'
             'Estado: $estado',
           ),
           isThreeLine: true,
@@ -228,7 +217,6 @@ class AnfitrionHomeScreen extends StatelessWidget {
   Widget _buildTab(
     BuildContext context,
     List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
-    String empresaId,
   ) {
     final anfitrionDocs = _porRol(docs, 'anfitrion');
     final invitadoDocs = _porRol(docs, 'invitado');
@@ -242,7 +230,7 @@ class AnfitrionHomeScreen extends StatelessWidget {
             style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
           ),
         ),
-        _seccionAnfitrion(context, anfitrionDocs, empresaId),
+        _seccionAnfitrion(context, anfitrionDocs),
         const Divider(),
         const Padding(
           padding: EdgeInsets.fromLTRB(12, 12, 12, 4),
@@ -258,33 +246,19 @@ class AnfitrionHomeScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<Map<String, String>>(
-      future: _contexto(),
-      builder: (context, ctxSnap) {
-        if (ctxSnap.connectionState == ConnectionState.waiting) {
+    return FutureBuilder<String>(
+      future: _obtenerEmail(),
+      builder: (context, emailSnap) {
+        if (!emailSnap.hasData) {
           return const Scaffold(
             body: Center(child: CircularProgressIndicator()),
           );
         }
 
-        if (ctxSnap.hasError) {
-          return Scaffold(
-            appBar: AppBar(title: const Text('Mis eventos')),
-            body: Center(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Text('Error cargando usuario: ${ctxSnap.error}'),
-              ),
-            ),
-          );
-        }
-
-        final email = ctxSnap.data?['email'] ?? '';
-        final empresaId = ctxSnap.data?['empresaId'] ?? '';
+        final email = emailSnap.data!;
 
         final stream = FirebaseFirestore.instance
             .collection('usuarios_eventos')
-            .where('empresaId', isEqualTo: empresaId)
             .where('email', isEqualTo: email)
             .where('activo', isEqualTo: true)
             .snapshots();
@@ -314,23 +288,11 @@ class AnfitrionHomeScreen extends StatelessWidget {
             body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
               stream: stream,
               builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
+                if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());
                 }
 
-                if (snapshot.hasError) {
-                  return Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Text(
-                        'Error cargando eventos: ${snapshot.error}',
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                  );
-                }
-
-                final docs = snapshot.data?.docs ?? [];
+                final docs = snapshot.data!.docs;
 
                 final activos = _filtrar(docs, 'activos');
                 final proximos = _filtrar(docs, 'proximos');
@@ -339,10 +301,10 @@ class AnfitrionHomeScreen extends StatelessWidget {
 
                 return TabBarView(
                   children: [
-                    _buildTab(context, activos, empresaId),
-                    _buildTab(context, proximos, empresaId),
-                    _buildTab(context, finalizados, empresaId),
-                    _buildTab(context, cerrados, empresaId),
+                    _buildTab(context, activos),
+                    _buildTab(context, proximos),
+                    _buildTab(context, finalizados),
+                    _buildTab(context, cerrados),
                   ],
                 );
               },

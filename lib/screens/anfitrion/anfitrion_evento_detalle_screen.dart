@@ -3,6 +3,8 @@ import 'dart:ui' as ui;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -59,6 +61,7 @@ class AnfitrionEventoDetalleScreen extends StatelessWidget {
   DateTime? _parseFecha(dynamic value) {
     if (value == null) return null;
     if (value is Timestamp) return value.toDate();
+
     if (value is String) {
       try {
         return DateTime.parse(value);
@@ -66,6 +69,7 @@ class AnfitrionEventoDetalleScreen extends StatelessWidget {
         return null;
       }
     }
+
     return null;
   }
 
@@ -174,15 +178,17 @@ class AnfitrionEventoDetalleScreen extends StatelessWidget {
       );
     } catch (e) {
       if (!context.mounted) return;
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error compartiendo QR: $e')),
       );
     }
   }
 
-  Future<void> _compartirTodosLosQrsInvitados({
+  Future<void> _compartirPdfQrsInvitados({
     required BuildContext context,
     required String nombreEvento,
+    required String nombreAnfitrion,
   }) async {
     try {
       final snap = await FirebaseFirestore.instance
@@ -196,61 +202,96 @@ class AnfitrionEventoDetalleScreen extends StatelessWidget {
       if (snap.docs.isEmpty) {
         if (!context.mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No hay invitados para compartir')),
+          const SnackBar(content: Text('No hay invitados para generar PDF')),
         );
         return;
       }
 
-      final archivos = <XFile>[];
-      final resumen = StringBuffer()
-        ..writeln('QRs de invitados')
-        ..writeln('Evento: $nombreEvento')
-        ..writeln();
-
-      int contador = 1;
+      final pdf = pw.Document();
 
       for (final doc in snap.docs) {
         final data = doc.data();
-        final nombre =
-            (data['nombre_invitado'] ?? 'Invitado $contador').toString();
+
+        final nombre = (data['nombre_invitado'] ?? '').toString();
+        final email = (data['email_invitado'] ?? '').toString();
         final mesa = (data['mesa'] ?? '').toString();
         final qr = (data['qr_code'] ?? '').toString();
 
         if (qr.trim().isEmpty) continue;
 
-        final bytes = await _generarQrPng(qr);
-        if (bytes == null) continue;
-
-        archivos.add(
-          XFile.fromData(
-            bytes,
-            mimeType: 'image/png',
-            name: 'qr_${contador}_${_nombreArchivoSeguro(nombre)}.png',
+        pdf.addPage(
+          pw.Page(
+            build: (_) {
+              return pw.Center(
+                child: pw.Container(
+                  padding: const pw.EdgeInsets.all(28),
+                  decoration: pw.BoxDecoration(
+                    border: pw.Border.all(width: 1.2),
+                    borderRadius: pw.BorderRadius.circular(14),
+                  ),
+                  child: pw.Column(
+                    mainAxisSize: pw.MainAxisSize.min,
+                    children: [
+                      pw.Text(
+                        'Invitación del evento',
+                        style: pw.TextStyle(
+                          fontSize: 24,
+                          fontWeight: pw.FontWeight.bold,
+                        ),
+                      ),
+                      pw.SizedBox(height: 10),
+                      pw.Text(
+                        nombreEvento,
+                        style: pw.TextStyle(
+                          fontSize: 20,
+                          fontWeight: pw.FontWeight.bold,
+                        ),
+                      ),
+                      pw.SizedBox(height: 20),
+                      pw.Text(
+                        nombre,
+                        style: pw.TextStyle(
+                          fontSize: 18,
+                          fontWeight: pw.FontWeight.bold,
+                        ),
+                      ),
+                      if (email.isNotEmpty) pw.Text(email),
+                      pw.SizedBox(height: 8),
+                      pw.Text(
+                        mesa.isEmpty ? 'Mesa: sin asignar' : 'Mesa: $mesa',
+                        style: const pw.TextStyle(fontSize: 16),
+                      ),
+                      pw.SizedBox(height: 22),
+                      pw.BarcodeWidget(
+                        barcode: pw.Barcode.qrCode(),
+                        data: qr,
+                        width: 190,
+                        height: 190,
+                      ),
+                      pw.SizedBox(height: 18),
+                      pw.Text('Presenta este QR al ingresar.'),
+                      pw.SizedBox(height: 8),
+                      pw.Text('Anfitrión: $nombreAnfitrion'),
+                    ],
+                  ),
+                ),
+              );
+            },
           ),
         );
-
-        resumen.writeln(
-            '$contador. $nombre${mesa.isNotEmpty ? " - Mesa: $mesa" : ""}');
-        contador++;
       }
 
-      if (archivos.isEmpty) {
-        if (!context.mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No se pudieron generar imágenes QR')),
-        );
-        return;
-      }
+      final bytes = await pdf.save();
 
-      await Share.shareXFiles(
-        archivos,
-        text: resumen.toString(),
-        subject: 'QRs de invitados - $nombreEvento',
+      await Printing.sharePdf(
+        bytes: bytes,
+        filename: 'qrs_${_nombreArchivoSeguro(nombreEvento)}.pdf',
       );
     } catch (e) {
       if (!context.mounted) return;
+
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error compartiendo QRs: $e')),
+        SnackBar(content: Text('Error generando PDF: $e')),
       );
     }
   }
@@ -317,27 +358,35 @@ class AnfitrionEventoDetalleScreen extends StatelessWidget {
                   child: Text(
                     nombreEvento,
                     style: const TextStyle(
-                        fontSize: 22, fontWeight: FontWeight.bold),
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
                 Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text('Lugar: $lugar')),
+                  alignment: Alignment.centerLeft,
+                  child: Text('Lugar: $lugar'),
+                ),
                 Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text('Anfitrión: $nombreAnfitrion')),
+                  alignment: Alignment.centerLeft,
+                  child: Text('Anfitrión: $nombreAnfitrion'),
+                ),
                 Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text('Horario: $horario')),
+                  alignment: Alignment.centerLeft,
+                  child: Text('Horario: $horario'),
+                ),
                 Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text('Estado: $estado')),
+                  alignment: Alignment.centerLeft,
+                  child: Text('Estado: $estado'),
+                ),
                 Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text('Mi acceso: $estadoAsistencia')),
+                  alignment: Alignment.centerLeft,
+                  child: Text('Mi acceso: $estadoAsistencia'),
+                ),
                 Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text('Cupo asignado: $maxInvitados')),
+                  alignment: Alignment.centerLeft,
+                  child: Text('Cupo asignado: $maxInvitados'),
+                ),
                 const SizedBox(height: 16),
                 Wrap(
                   spacing: 8,
@@ -391,11 +440,12 @@ class AnfitrionEventoDetalleScreen extends StatelessWidget {
                       child: const Text('Compartir mi QR'),
                     ),
                     ElevatedButton(
-                      onPressed: () => _compartirTodosLosQrsInvitados(
+                      onPressed: () => _compartirPdfQrsInvitados(
                         context: context,
                         nombreEvento: nombreEvento,
+                        nombreAnfitrion: nombreAnfitrion,
                       ),
-                      child: const Text('Compartir QRs invitados'),
+                      child: const Text('PDF QRs invitados'),
                     ),
                     ElevatedButton(
                       onPressed: invitadoEspejoId.isEmpty
@@ -462,7 +512,8 @@ class AnfitrionEventoDetalleScreen extends StatelessWidget {
                       if (invitadoSnap.hasError) {
                         return Center(
                           child: Text(
-                              'Error cargando invitados: ${invitadoSnap.error}'),
+                            'Error cargando invitados: ${invitadoSnap.error}',
+                          ),
                         );
                       }
 
@@ -471,9 +522,11 @@ class AnfitrionEventoDetalleScreen extends StatelessWidget {
                       docs.sort((a, b) {
                         final aTs = a.data()['createdAt'];
                         final bTs = b.data()['createdAt'];
+
                         if (aTs is Timestamp && bTs is Timestamp) {
                           return bTs.compareTo(aTs);
                         }
+
                         return 0;
                       });
 
@@ -493,7 +546,8 @@ class AnfitrionEventoDetalleScreen extends StatelessWidget {
                             child: docs.isEmpty
                                 ? const Center(
                                     child:
-                                        Text('Aún no has registrado invitados'))
+                                        Text('Aún no has registrado invitados'),
+                                  )
                                 : ListView.separated(
                                     itemCount: docs.length,
                                     separatorBuilder: (_, __) =>
@@ -510,7 +564,7 @@ class AnfitrionEventoDetalleScreen extends StatelessWidget {
                                       final mesa = (d['mesa'] ?? '').toString();
                                       final esAnfitrion =
                                           d['esAnfitrion'] == true;
-                                      final estado =
+                                      final estadoInvitado =
                                           (d['estado_asistencia'] ?? '')
                                               .toString();
                                       final qr =
@@ -521,7 +575,7 @@ class AnfitrionEventoDetalleScreen extends StatelessWidget {
                                         subtitle: Text(
                                           '$email\n'
                                           'Mesa: $mesa\n'
-                                          'Estado: $estado'
+                                          'Estado: $estadoInvitado'
                                           '${esAnfitrion ? "\nTipo: Anfitrión" : ""}',
                                         ),
                                         isThreeLine: true,
@@ -564,7 +618,8 @@ class AnfitrionEventoDetalleScreen extends StatelessWidget {
                                                 context: context,
                                                 builder: (_) => AlertDialog(
                                                   title: const Text(
-                                                      'Eliminar invitado'),
+                                                    'Eliminar invitado',
+                                                  ),
                                                   content: const Text(
                                                     '¿Seguro que deseas eliminar este invitado?',
                                                   ),
@@ -572,14 +627,18 @@ class AnfitrionEventoDetalleScreen extends StatelessWidget {
                                                     TextButton(
                                                       onPressed: () =>
                                                           Navigator.pop(
-                                                              context, false),
+                                                        context,
+                                                        false,
+                                                      ),
                                                       child: const Text(
                                                           'Cancelar'),
                                                     ),
                                                     ElevatedButton(
                                                       onPressed: () =>
                                                           Navigator.pop(
-                                                              context, true),
+                                                        context,
+                                                        true,
+                                                      ),
                                                       child: const Text(
                                                           'Eliminar'),
                                                     ),

@@ -3,6 +3,8 @@ import 'dart:ui' as ui;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -20,6 +22,40 @@ class ListaInvitadosScreen extends StatelessWidget {
     this.titulo,
   });
 
+  Future<String> _nombreEvento() async {
+    final doc = await FirebaseFirestore.instance
+        .collection('eventos')
+        .doc(eventoId)
+        .get();
+    final data = doc.data() ?? {};
+    return (data['nombreEvento'] ?? 'Evento').toString();
+  }
+
+  String _nombreArchivoSeguro(String value) {
+    return value
+        .trim()
+        .replaceAll(RegExp(r'[^\w\s-]'), '')
+        .replaceAll(RegExp(r'\s+'), '_')
+        .toLowerCase();
+  }
+
+  Future<Uint8List?> _generarQrPng(String qr) async {
+    final painter = QrPainter(
+      data: qr,
+      version: QrVersions.auto,
+      gapless: true,
+      color: Colors.black,
+      emptyColor: Colors.white,
+    );
+
+    final byteData = await painter.toImageData(
+      900,
+      format: ui.ImageByteFormat.png,
+    );
+
+    return byteData?.buffer.asUint8List();
+  }
+
   Future<void> _compartirQrComoImagen({
     required BuildContext context,
     required String qr,
@@ -35,28 +71,15 @@ class ListaInvitadosScreen extends StatelessWidget {
         return;
       }
 
-      final painter = QrPainter(
-        data: qr,
-        version: QrVersions.auto,
-        gapless: true,
-        color: Colors.black,
-        emptyColor: Colors.white,
-      );
+      final bytes = await _generarQrPng(qr);
 
-      final byteData = await painter.toImageData(
-        900,
-        format: ui.ImageByteFormat.png,
-      );
-
-      if (byteData == null) {
+      if (bytes == null) {
         if (!context.mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('No se pudo generar la imagen QR')),
         );
         return;
       }
-
-      final bytes = byteData.buffer.asUint8List();
 
       final texto = StringBuffer()
         ..writeln('QR de acceso')
@@ -72,7 +95,7 @@ class ListaInvitadosScreen extends StatelessWidget {
           XFile.fromData(
             bytes,
             mimeType: 'image/png',
-            name: 'qr_${nombre.replaceAll(' ', '_')}.png',
+            name: 'qr_${_nombreArchivoSeguro(nombre)}.png',
           ),
         ],
         text: texto.toString(),
@@ -80,8 +103,127 @@ class ListaInvitadosScreen extends StatelessWidget {
       );
     } catch (e) {
       if (!context.mounted) return;
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error compartiendo QR: $e')),
+      );
+    }
+  }
+
+  Future<void> _compartirPdfQrs({
+    required BuildContext context,
+    required String nombreEvento,
+    required List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+    required bool soloInvitados,
+  }) async {
+    try {
+      final registros = docs.where((doc) {
+        final data = doc.data();
+        final esAnfitrion = data['esAnfitrion'] == true;
+        final qr = (data['qr_code'] ?? '').toString();
+
+        if (qr.trim().isEmpty) return false;
+        if (soloInvitados && esAnfitrion) return false;
+
+        return true;
+      }).toList();
+
+      if (registros.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No hay QRs para generar PDF')),
+        );
+        return;
+      }
+
+      final pdf = pw.Document();
+
+      for (final doc in registros) {
+        final data = doc.data();
+
+        final nombre = (data['nombre_invitado'] ?? '').toString();
+        final email = (data['email_invitado'] ?? '').toString();
+        final mesa = (data['mesa'] ?? '').toString();
+        final qr = (data['qr_code'] ?? '').toString();
+        final esAnfitrion = data['esAnfitrion'] == true;
+        final anfitrionNombre = (data['anfitrionNombre'] ?? '').toString();
+
+        pdf.addPage(
+          pw.Page(
+            build: (_) {
+              return pw.Center(
+                child: pw.Container(
+                  padding: const pw.EdgeInsets.all(28),
+                  decoration: pw.BoxDecoration(
+                    border: pw.Border.all(width: 1.2),
+                    borderRadius: pw.BorderRadius.circular(14),
+                  ),
+                  child: pw.Column(
+                    mainAxisSize: pw.MainAxisSize.min,
+                    children: [
+                      pw.Text(
+                        'Invitación del evento',
+                        style: pw.TextStyle(
+                          fontSize: 24,
+                          fontWeight: pw.FontWeight.bold,
+                        ),
+                      ),
+                      pw.SizedBox(height: 10),
+                      pw.Text(
+                        nombreEvento,
+                        style: pw.TextStyle(
+                          fontSize: 20,
+                          fontWeight: pw.FontWeight.bold,
+                        ),
+                      ),
+                      pw.SizedBox(height: 18),
+                      pw.Text(
+                        nombre,
+                        style: pw.TextStyle(
+                          fontSize: 18,
+                          fontWeight: pw.FontWeight.bold,
+                        ),
+                      ),
+                      if (email.isNotEmpty) pw.Text(email),
+                      pw.SizedBox(height: 8),
+                      pw.Text(
+                        mesa.isEmpty ? 'Mesa: sin asignar' : 'Mesa: $mesa',
+                        style: const pw.TextStyle(fontSize: 16),
+                      ),
+                      pw.SizedBox(height: 8),
+                      pw.Text(
+                        esAnfitrion ? 'Tipo: Anfitrión' : 'Tipo: Invitado',
+                      ),
+                      if (anfitrionNombre.isNotEmpty && !esAnfitrion)
+                        pw.Text('Anfitrión: $anfitrionNombre'),
+                      pw.SizedBox(height: 22),
+                      pw.BarcodeWidget(
+                        barcode: pw.Barcode.qrCode(),
+                        data: qr,
+                        width: 190,
+                        height: 190,
+                      ),
+                      pw.SizedBox(height: 18),
+                      pw.Text('Presenta este QR al ingresar.'),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        );
+      }
+
+      await Printing.sharePdf(
+        bytes: await pdf.save(),
+        filename: soloInvitados
+            ? 'qrs_invitados_${_nombreArchivoSeguro(nombreEvento)}.pdf'
+            : 'qrs_todos_${_nombreArchivoSeguro(nombreEvento)}.pdf',
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error generando PDF: $e')),
       );
     }
   }
@@ -95,7 +237,8 @@ class ListaInvitadosScreen extends StatelessWidget {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-              'El QR de anfitrión se elimina desde Gestión de anfitriones'),
+            'El QR de anfitrión se elimina desde Gestión de anfitriones',
+          ),
         ),
       );
       return;
@@ -141,15 +284,6 @@ class ListaInvitadosScreen extends StatelessWidget {
         SnackBar(content: Text('Error eliminando: $e')),
       );
     }
-  }
-
-  Future<String> _nombreEvento() async {
-    final doc = await FirebaseFirestore.instance
-        .collection('eventos')
-        .doc(eventoId)
-        .get();
-    final data = doc.data() ?? {};
-    return (data['nombreEvento'] ?? 'Evento').toString();
   }
 
   @override
@@ -201,6 +335,36 @@ class ListaInvitadosScreen extends StatelessWidget {
 
               return ListView(
                 children: [
+                  Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        ElevatedButton.icon(
+                          onPressed: () => _compartirPdfQrs(
+                            context: context,
+                            nombreEvento: nombreEvento,
+                            docs: docs,
+                            soloInvitados: true,
+                          ),
+                          icon: const Icon(Icons.picture_as_pdf),
+                          label: const Text('PDF invitados'),
+                        ),
+                        ElevatedButton.icon(
+                          onPressed: () => _compartirPdfQrs(
+                            context: context,
+                            nombreEvento: nombreEvento,
+                            docs: docs,
+                            soloInvitados: false,
+                          ),
+                          icon: const Icon(Icons.picture_as_pdf),
+                          label: const Text('PDF todos'),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Divider(),
                   if (anfitriones.isNotEmpty) ...[
                     const Padding(
                       padding: EdgeInsets.all(12),
