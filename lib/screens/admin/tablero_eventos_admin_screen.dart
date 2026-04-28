@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
+import '../../theme/app_theme.dart';
 import 'editar_evento_screen.dart';
 import 'panel_evento_screen.dart';
 
@@ -14,7 +15,6 @@ class TableroEventosAdminScreen extends StatelessWidget {
 
   DateTime? _parseFecha(dynamic value) {
     if (value == null) return null;
-
     if (value is Timestamp) return value.toDate();
 
     if (value is String) {
@@ -64,15 +64,30 @@ class TableroEventosAdminScreen extends StatelessWidget {
   Color _colorEstado(String estado) {
     switch (estado) {
       case 'activo':
-        return Colors.green;
+        return AppTheme.success;
       case 'proximo':
-        return Colors.orange;
+        return AppTheme.warning;
       case 'finalizado':
-        return Colors.grey;
+        return AppTheme.textMuted;
       case 'cerrado':
-        return Colors.red;
+        return AppTheme.danger;
       default:
-        return Colors.blueGrey;
+        return AppTheme.primary;
+    }
+  }
+
+  IconData _iconoEstado(String estado) {
+    switch (estado) {
+      case 'activo':
+        return Icons.play_circle_outline;
+      case 'proximo':
+        return Icons.schedule;
+      case 'finalizado':
+        return Icons.flag_outlined;
+      case 'cerrado':
+        return Icons.lock_outline;
+      default:
+        return Icons.event;
     }
   }
 
@@ -80,8 +95,10 @@ class TableroEventosAdminScreen extends StatelessWidget {
     final fecha = _parseFecha(value);
     if (fecha == null) return 'Sin definir';
 
+    String two(int n) => n.toString().padLeft(2, '0');
+
     return '${fecha.day}/${fecha.month}/${fecha.year} '
-        '${fecha.hour}:${fecha.minute.toString().padLeft(2, '0')}';
+        '${two(fecha.hour)}:${two(fecha.minute)}';
   }
 
   Future<void> _cerrarEvento(String eventoId) async {
@@ -152,23 +169,163 @@ class TableroEventosAdminScreen extends StatelessWidget {
     }).toList();
   }
 
+  void _ordenarPorFecha(
+      List<QueryDocumentSnapshot<Map<String, dynamic>>> docs) {
+    docs.sort((a, b) {
+      final fechaA = _parseFecha(a.data()['fechaHoraInicio']);
+      final fechaB = _parseFecha(b.data()['fechaHoraInicio']);
+
+      if (fechaA == null && fechaB == null) return 0;
+      if (fechaA == null) return 1;
+      if (fechaB == null) return -1;
+
+      return fechaA.compareTo(fechaB);
+    });
+  }
+
+  Widget _resumenCard({
+    required String titulo,
+    required int total,
+    required Color color,
+    required IconData icon,
+  }) {
+    return Expanded(
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              CircleAvatar(
+                backgroundColor: color.withOpacity(0.12),
+                child: Icon(icon, color: color),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                '$total',
+                style: const TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.w900,
+                  color: AppTheme.textDark,
+                ),
+              ),
+              Text(
+                titulo,
+                style: const TextStyle(
+                  color: AppTheme.textMuted,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHeader({
+    required int activos,
+    required int proximos,
+    required int finalizados,
+    required int cerrados,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Dashboard de eventos',
+            style: TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.w900,
+              color: AppTheme.textDark,
+            ),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Controla tus eventos, invitados, anfitriones, accesos y reportes.',
+            style: TextStyle(color: AppTheme.textMuted),
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              _resumenCard(
+                titulo: 'Activos',
+                total: activos,
+                color: AppTheme.success,
+                icon: Icons.play_circle_outline,
+              ),
+              const SizedBox(width: 8),
+              _resumenCard(
+                titulo: 'Próximos',
+                total: proximos,
+                color: AppTheme.warning,
+                icon: Icons.schedule,
+              ),
+            ],
+          ),
+          Row(
+            children: [
+              _resumenCard(
+                titulo: 'Finalizados',
+                total: finalizados,
+                color: AppTheme.textMuted,
+                icon: Icons.flag_outlined,
+              ),
+              const SizedBox(width: 8),
+              _resumenCard(
+                titulo: 'Cerrados',
+                total: cerrados,
+                color: AppTheme.danger,
+                icon: Icons.lock_outline,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _emptyState(String texto) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(28),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.event_busy,
+              size: 64,
+              color: AppTheme.textMuted.withOpacity(0.7),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              texto,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: AppTheme.textMuted,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildListaEventos(
     BuildContext context,
     List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
   ) {
     if (docs.isEmpty) {
-      return const Center(child: Text('No hay eventos en esta sección'));
+      return _emptyState('No hay eventos en esta sección');
     }
 
-    docs.sort((a, b) {
-      final fechaA = _parseFecha(a.data()['fechaHoraInicio']);
-      final fechaB = _parseFecha(b.data()['fechaHoraInicio']);
-
-      if (fechaA == null || fechaB == null) return 0;
-      return fechaA.compareTo(fechaB);
-    });
+    _ordenarPorFecha(docs);
 
     return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
       itemCount: docs.length,
       itemBuilder: (context, index) {
         final doc = docs[index];
@@ -180,28 +337,12 @@ class TableroEventosAdminScreen extends StatelessWidget {
         final usaAnfitriones = data['usaAnfitriones'] == true;
         final cantidadAnfitriones =
             (data['cantidadAnfitriones'] ?? 0).toString();
-
         final estado = _calcularEstado(data);
+        final color = _colorEstado(estado);
 
         return Card(
-          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          child: ListTile(
-            leading: CircleAvatar(
-              backgroundColor: _colorEstado(estado),
-            ),
-            title: Text(
-              nombreEvento,
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-            subtitle: Text(
-              'Estado: ${_labelEstado(estado)}\n'
-              'Lugar: $lugar\n'
-              'Inicio: ${_formatearFecha(data['fechaHoraInicio'])}\n'
-              'Fin: ${_formatearFecha(data['fechaHoraFin'])}\n'
-              'Invitados: $totalInvitados'
-              '${usaAnfitriones ? "\nAnfitriones permitidos: $cantidadAnfitriones" : ""}',
-            ),
-            isThreeLine: true,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(18),
             onTap: () {
               Navigator.push(
                 context,
@@ -214,123 +355,212 @@ class TableroEventosAdminScreen extends StatelessWidget {
                 ),
               );
             },
-            trailing: PopupMenuButton<String>(
-              onSelected: (value) async {
-                if (value == 'abrir') {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => PanelEventoScreen(
-                        eventoId: doc.id,
-                        empresaId: empresaId,
-                        nombreEvento: nombreEvento,
-                      ),
-                    ),
-                  );
-                }
-
-                if (value == 'editar') {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => EditarEventoScreen(
-                        eventoId: doc.id,
-                        empresaId: empresaId,
-                      ),
-                    ),
-                  );
-                }
-
-                if (value == 'cerrar') {
-                  final ok = await _confirmar(
-                    context,
-                    titulo: 'Cerrar evento',
-                    mensaje:
-                        '¿Seguro que deseas cerrar este evento? Después quedará solo para consulta, reporte y archivo.',
-                    accion: 'Cerrar',
-                  );
-
-                  if (ok) {
-                    await _cerrarEvento(doc.id);
-                  }
-                }
-
-                if (value == 'archivar') {
-                  final ok = await _confirmar(
-                    context,
-                    titulo: 'Archivar evento',
-                    mensaje: '¿Seguro que deseas archivar este evento cerrado?',
-                    accion: 'Archivar',
-                  );
-
-                  if (ok) {
-                    await _archivarEvento(doc.id);
-                  }
-                }
-
-                if (value == 'eliminar') {
-                  final ok = await _confirmar(
-                    context,
-                    titulo: 'Eliminar evento',
-                    mensaje:
-                        '¿Seguro que deseas eliminar este evento? Esta acción no se puede deshacer.',
-                    accion: 'Eliminar',
-                  );
-
-                  if (ok) {
-                    await _eliminarEvento(doc.id);
-                  }
-                }
-              },
-              itemBuilder: (_) {
-                final items = <PopupMenuEntry<String>>[
-                  const PopupMenuItem(
-                    value: 'abrir',
-                    child: Text('Abrir evento'),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  CircleAvatar(
+                    backgroundColor: color.withOpacity(0.12),
+                    child: Icon(_iconoEstado(estado), color: color),
                   ),
-                ];
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          nombreEvento,
+                          style: const TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w900,
+                            color: AppTheme.textDark,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: color.withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            _labelEstado(estado),
+                            style: TextStyle(
+                              color: color,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        if (lugar.isNotEmpty)
+                          _infoLine(Icons.location_on_outlined, lugar),
+                        _infoLine(
+                          Icons.calendar_month_outlined,
+                          'Inicio: ${_formatearFecha(data['fechaHoraInicio'])}',
+                        ),
+                        _infoLine(
+                          Icons.timer_outlined,
+                          'Fin: ${_formatearFecha(data['fechaHoraFin'])}',
+                        ),
+                        _infoLine(
+                          Icons.people_outline,
+                          'Invitados permitidos: $totalInvitados',
+                        ),
+                        if (usaAnfitriones)
+                          _infoLine(
+                            Icons.groups_outlined,
+                            'Anfitriones permitidos: $cantidadAnfitriones',
+                          ),
+                      ],
+                    ),
+                  ),
+                  PopupMenuButton<String>(
+                    onSelected: (value) async {
+                      if (value == 'abrir') {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => PanelEventoScreen(
+                              eventoId: doc.id,
+                              empresaId: empresaId,
+                              nombreEvento: nombreEvento,
+                            ),
+                          ),
+                        );
+                      }
 
-                if (estado == 'proximo') {
-                  items.addAll([
-                    const PopupMenuItem(
-                      value: 'editar',
-                      child: Text('Editar evento'),
-                    ),
-                    const PopupMenuItem(
-                      value: 'eliminar',
-                      child: Text('Eliminar evento'),
-                    ),
-                  ]);
-                }
+                      if (value == 'editar') {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => EditarEventoScreen(
+                              eventoId: doc.id,
+                              empresaId: empresaId,
+                            ),
+                          ),
+                        );
+                      }
 
-                if (estado == 'finalizado') {
-                  items.add(
-                    const PopupMenuItem(
-                      value: 'cerrar',
-                      child: Text('Cerrar evento'),
-                    ),
-                  );
-                }
+                      if (value == 'cerrar') {
+                        final ok = await _confirmar(
+                          context,
+                          titulo: 'Cerrar evento',
+                          mensaje:
+                              '¿Seguro que deseas cerrar este evento? Después quedará solo para consulta, reporte y archivo.',
+                          accion: 'Cerrar',
+                        );
 
-                if (estado == 'cerrado') {
-                  items.addAll([
-                    const PopupMenuItem(
-                      value: 'archivar',
-                      child: Text('Archivar evento'),
-                    ),
-                    const PopupMenuItem(
-                      value: 'eliminar',
-                      child: Text('Eliminar evento'),
-                    ),
-                  ]);
-                }
+                        if (ok) {
+                          await _cerrarEvento(doc.id);
+                        }
+                      }
 
-                return items;
-              },
+                      if (value == 'archivar') {
+                        final ok = await _confirmar(
+                          context,
+                          titulo: 'Archivar evento',
+                          mensaje:
+                              '¿Seguro que deseas archivar este evento cerrado?',
+                          accion: 'Archivar',
+                        );
+
+                        if (ok) {
+                          await _archivarEvento(doc.id);
+                        }
+                      }
+
+                      if (value == 'eliminar') {
+                        final ok = await _confirmar(
+                          context,
+                          titulo: 'Eliminar evento',
+                          mensaje:
+                              '¿Seguro que deseas eliminar este evento? Esta acción no se puede deshacer.',
+                          accion: 'Eliminar',
+                        );
+
+                        if (ok) {
+                          await _eliminarEvento(doc.id);
+                        }
+                      }
+                    },
+                    itemBuilder: (_) {
+                      final items = <PopupMenuEntry<String>>[
+                        const PopupMenuItem(
+                          value: 'abrir',
+                          child: Text('Abrir evento'),
+                        ),
+                      ];
+
+                      if (estado == 'proximo') {
+                        items.addAll([
+                          const PopupMenuItem(
+                            value: 'editar',
+                            child: Text('Editar evento'),
+                          ),
+                          const PopupMenuItem(
+                            value: 'eliminar',
+                            child: Text('Eliminar evento'),
+                          ),
+                        ]);
+                      }
+
+                      if (estado == 'finalizado') {
+                        items.add(
+                          const PopupMenuItem(
+                            value: 'cerrar',
+                            child: Text('Cerrar evento'),
+                          ),
+                        );
+                      }
+
+                      if (estado == 'cerrado') {
+                        items.addAll([
+                          const PopupMenuItem(
+                            value: 'archivar',
+                            child: Text('Archivar evento'),
+                          ),
+                          const PopupMenuItem(
+                            value: 'eliminar',
+                            child: Text('Eliminar evento'),
+                          ),
+                        ]);
+                      }
+
+                      return items;
+                    },
+                  ),
+                ],
+              ),
             ),
           ),
         );
       },
+    );
+  }
+
+  Widget _infoLine(IconData icon, String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: AppTheme.textMuted),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              text,
+              style: const TextStyle(
+                color: AppTheme.textMuted,
+                fontSize: 13,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -343,9 +573,11 @@ class TableroEventosAdminScreen extends StatelessWidget {
     return DefaultTabController(
       length: 4,
       child: Scaffold(
+        backgroundColor: AppTheme.background,
         appBar: AppBar(
-          title: const Text('Tablero de eventos'),
+          title: const Text('Eventos'),
           bottom: const TabBar(
+            isScrollable: true,
             tabs: [
               Tab(text: 'Activos'),
               Tab(text: 'Próximos'),
@@ -363,7 +595,13 @@ class TableroEventosAdminScreen extends StatelessWidget {
 
             if (snapshot.hasError) {
               return Center(
-                child: Text('Error cargando eventos: ${snapshot.error}'),
+                child: Padding(
+                  padding: const EdgeInsets.all(18),
+                  child: Text(
+                    'Error cargando eventos: ${snapshot.error}',
+                    textAlign: TextAlign.center,
+                  ),
+                ),
               );
             }
 
@@ -374,12 +612,24 @@ class TableroEventosAdminScreen extends StatelessWidget {
             final finalizados = _filtrar(docs, 'finalizado');
             final cerrados = _filtrar(docs, 'cerrado');
 
-            return TabBarView(
+            return Column(
               children: [
-                _buildListaEventos(context, activos),
-                _buildListaEventos(context, proximos),
-                _buildListaEventos(context, finalizados),
-                _buildListaEventos(context, cerrados),
+                _buildHeader(
+                  activos: activos.length,
+                  proximos: proximos.length,
+                  finalizados: finalizados.length,
+                  cerrados: cerrados.length,
+                ),
+                Expanded(
+                  child: TabBarView(
+                    children: [
+                      _buildListaEventos(context, activos),
+                      _buildListaEventos(context, proximos),
+                      _buildListaEventos(context, finalizados),
+                      _buildListaEventos(context, cerrados),
+                    ],
+                  ),
+                ),
               ],
             );
           },

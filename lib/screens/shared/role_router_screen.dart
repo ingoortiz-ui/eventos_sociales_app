@@ -7,6 +7,7 @@ import '../anfitrion/anfitrion_home_screen.dart';
 import '../capitan/cap_meseros_home_screen.dart';
 import '../hostess/hostess_home_screen.dart';
 import '../invitado/invitado_home_screen.dart';
+import '../owner/owner_home_screen.dart';
 import '../usuario/usuario_home_screen.dart';
 import 'login_screen.dart';
 
@@ -155,6 +156,12 @@ class RoleRouterScreen extends StatelessWidget {
         }
 
         switch (rol) {
+          case 'app_owner':
+            return OwnerHomeScreen(
+              nombre: nombre,
+              email: email,
+            );
+
           case 'admin':
             return AdminHomeScreen(
               nombre: nombre,
